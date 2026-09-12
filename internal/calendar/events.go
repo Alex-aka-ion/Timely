@@ -2,9 +2,12 @@ package calendar
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -197,8 +200,17 @@ func SaveToken(path string, t *oauth2.Token) error {
 	return json.NewEncoder(f).Encode(t)
 }
 
-// RunAuthFlow проводит первичную OAuth-авторизацию.
-// Печатает URL, ждёт ввод authorization code из stdin, обменивает на token.
+// RunAuthFlow проводит первичную OAuth-авторизацию через loopback flow.
+//
+// Раньше здесь был OOB-flow (Google печатал код, пользователь копировал его
+// руками в терминал) — Google отключил этот механизм в январе 2023 года.
+// Актуальная замена для десктопных/CLI-приложений — loopback flow: поднимаем
+// временный HTTP-сервер на 127.0.0.1 (порт выбирает ОС — Google принимает
+// любой порт на loopback-адресе для клиентов типа "Desktop app", регистрировать
+// его заранее в консоли не нужно), открываем ссылку авторизации, и после
+// согласия пользователя Google сам делает редирект браузера на этот локальный
+// сервер с кодом авторизации в query-параметре. Ручного копирования кода
+// больше нет.
 //
 // Использование: ./booking-bot --auth
 func RunAuthFlow(ctx context.Context, credentialsPath, tokenPath string) error {
@@ -206,13 +218,79 @@ func RunAuthFlow(ctx context.Context, credentialsPath, tokenPath string) error {
 	if err != nil {
 		return err
 	}
-	authURL := cfg.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
-	fmt.Printf("Перейдите по ссылке и разрешите доступ:\n\n%s\n\n", authURL)
-	fmt.Print("Введите код авторизации: ")
-	var code string
-	if _, err := fmt.Scan(&code); err != nil {
-		return fmt.Errorf("чтение кода: %w", err)
+
+	// port 0 — просим ОС выделить свободный порт сама, чтобы не зависеть
+	// от того, что конкретный порт может быть занят другим процессом.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return fmt.Errorf("запуск локального сервера для callback: %w", err)
 	}
+	defer listener.Close()
+
+	port := listener.Addr().(*net.TCPAddr).Port
+	cfg.RedirectURL = fmt.Sprintf("http://127.0.0.1:%d", port)
+
+	// state — случайная строка, защита от подделки callback (CSRF): в конце
+	// проверяем, что Google вернул именно то значение, которое мы отправили.
+	state, err := randomState()
+	if err != nil {
+		return fmt.Errorf("генерация state: %w", err)
+	}
+
+	// authResult — то, что придёт из HTTP-хендлера ниже. Хендлер выполняется
+	// в отдельной горутине (net/http сам её порождает на каждый запрос),
+	// поэтому единственный безопасный способ передать результат обратно в
+	// основную горутину — канал, а не обычная переменная.
+	type authResult struct {
+		code string
+		err  error
+	}
+	resultCh := make(chan authResult, 1)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		switch {
+		case q.Get("error") != "":
+			fmt.Fprintln(w, "Доступ не предоставлен, можно закрыть эту вкладку.")
+			resultCh <- authResult{err: fmt.Errorf("google вернул ошибку: %s", q.Get("error"))}
+		case q.Get("state") != state:
+			http.Error(w, "неверный state", http.StatusBadRequest)
+			resultCh <- authResult{err: errors.New("неверный state в callback — попробуйте ещё раз")}
+		case q.Get("code") == "":
+			http.Error(w, "нет code в запросе", http.StatusBadRequest)
+			resultCh <- authResult{err: errors.New("code отсутствует в callback")}
+		default:
+			fmt.Fprintln(w, "Готово! Можно закрыть эту вкладку и вернуться в терминал.")
+			resultCh <- authResult{code: q.Get("code")}
+		}
+	})
+
+	srv := &http.Server{Handler: mux}
+	go func() {
+		// ErrServerClosed — ожидаемая ошибка после srv.Shutdown ниже, не
+		// настоящий сбой, поэтому её отдельно отфильтровываем.
+		if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			fmt.Println("auth callback server:", err)
+		}
+	}()
+	defer srv.Shutdown(context.Background())
+
+	authURL := cfg.AuthCodeURL(state, oauth2.AccessTypeOffline)
+	fmt.Printf("Открой ссылку в браузере и разреши доступ:\n\n%s\n\n", authURL)
+	fmt.Println("Жду подтверждения в браузере...")
+
+	var code string
+	select {
+	case res := <-resultCh:
+		if res.err != nil {
+			return res.err
+		}
+		code = res.code
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
 	tok, err := cfg.Exchange(ctx, code)
 	if err != nil {
 		return fmt.Errorf("обмен кода: %w", err)
@@ -222,4 +300,14 @@ func RunAuthFlow(ctx context.Context, credentialsPath, tokenPath string) error {
 	}
 	fmt.Println("Токен сохранён в", tokenPath)
 	return nil
+}
+
+// randomState генерирует криптографически случайную строку для параметра
+// state — защита OAuth callback от подделки запроса (CSRF).
+func randomState() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
