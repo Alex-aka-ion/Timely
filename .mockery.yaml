@@ -1,0 +1,7 @@
+# Конфиг mockery. Запуск: mockery
+with-expecter: true
+dir: internal/{{ trimPrefix "Mock" .Name | snakecase }}
+output: internal/mocks
+outpkg: mocks
+filename: "{{ .InterfaceName }}.go"
+all: true

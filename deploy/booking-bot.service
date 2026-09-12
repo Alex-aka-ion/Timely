@@ -1,0 +1,36 @@
+[Unit]
+Description=Booking Bot — Telegram booking reminder bot
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=booking-bot
+Group=booking-bot
+WorkingDirectory=/opt/booking-bot
+ExecStart=/opt/booking-bot/booking-bot
+Restart=always
+RestartSec=5
+EnvironmentFile=/opt/booking-bot/.env
+
+# Безопасность: системный пользователь, без shell, минимальные привилегии.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+ReadWritePaths=/opt/booking-bot/data
+
+# Логи в journald.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

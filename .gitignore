@@ -1,0 +1,41 @@
+# Секреты — никогда в git
+.env
+.env.local
+*.env
+credentials.json
+token.json
+
+# База данных
+data/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Бинарники
+booking-bot
+booking-bot-*
+*.exe
+*.test
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Логи
+*.log
+logs/
+
+# Тестовое покрытие
+coverage.out
+coverage.html
+
+# Бэкапы
+backups/

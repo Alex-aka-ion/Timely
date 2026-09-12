@@ -1,0 +1,233 @@
+package store
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func newTestStore(t *testing.T) *SQLiteStore {
+	t.Helper()
+	s, err := NewSQLiteInMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	return s
+}
+
+func TestMigrationsApplied(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Глобальная настройка reminder_intervals=24h,2h должна быть после миграции.
+	v, err := s.GetSetting(ctx, "reminder_intervals")
+	require.NoError(t, err)
+	assert.Equal(t, "24h,2h", v)
+
+	// Все таблицы должны существовать.
+	tables := []string{"users", "messenger_accounts", "students",
+		"student_contacts", "event_students", "sent_reminders", "settings"}
+	for _, name := range tables {
+		var got string
+		err := s.db.QueryRowContext(ctx,
+			`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&got)
+		require.NoErrorf(t, err, "таблица %s должна существовать", name)
+	}
+}
+
+func TestUsersAndAccounts(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	u, err := s.CreateUser(ctx, "Иван Иванов")
+	require.NoError(t, err)
+	assert.NotZero(t, u.ID)
+	assert.Equal(t, "Иван Иванов", u.FullName)
+
+	require.NoError(t, s.SaveAccount(ctx, u.ID, "telegram", "111", "ivanov"))
+
+	got, err := s.GetUserByAccount(ctx, "telegram", "111")
+	require.NoError(t, err)
+	assert.Equal(t, u.ID, got.ID)
+
+	accs, err := s.GetActiveAccounts(ctx, u.ID)
+	require.NoError(t, err)
+	require.Len(t, accs, 1)
+	assert.True(t, accs[0].IsActive)
+}
+
+func TestUniqueAccount(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	a, err := s.CreateUser(ctx, "A")
+	require.NoError(t, err)
+	b, err := s.CreateUser(ctx, "B")
+	require.NoError(t, err)
+
+	require.NoError(t, s.SaveAccount(ctx, a.ID, "telegram", "111", "a"))
+	// При повторной регистрации тот же external_id переходит к новому user_id.
+	require.NoError(t, s.SaveAccount(ctx, b.ID, "telegram", "111", "b"))
+
+	got, err := s.GetUserByAccount(ctx, "telegram", "111")
+	require.NoError(t, err)
+	assert.Equal(t, b.ID, got.ID)
+}
+
+func TestDeactivateAccount(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	u, _ := s.CreateUser(ctx, "U")
+	_ = s.SaveAccount(ctx, u.ID, "telegram", "1", "u")
+
+	require.NoError(t, s.DeactivateAccount(ctx, "telegram", "1"))
+	_, err := s.GetUserByAccount(ctx, "telegram", "1")
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	// Повторная регистрация активирует обратно.
+	require.NoError(t, s.SaveAccount(ctx, u.ID, "telegram", "1", "u"))
+	got, err := s.GetUserByAccount(ctx, "telegram", "1")
+	require.NoError(t, err)
+	assert.Equal(t, u.ID, got.ID)
+}
+
+func TestForeignKeysEnforced(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	st, err := s.CreateStudent(ctx, "Петя")
+	require.NoError(t, err)
+
+	// Несуществующий user_id — должна быть ошибка FK.
+	err = s.LinkContact(ctx, st.ID, 9999, "Мама")
+	assert.Error(t, err)
+}
+
+func TestStudentContactsLinkUnlink(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	u1, _ := s.CreateUser(ctx, "Мама")
+	u2, _ := s.CreateUser(ctx, "Папа")
+	st, _ := s.CreateStudent(ctx, "Петя")
+
+	require.NoError(t, s.LinkContact(ctx, st.ID, u1.ID, "Мама"))
+	require.NoError(t, s.LinkContact(ctx, st.ID, u2.ID, "Папа"))
+
+	contacts, err := s.GetStudentContacts(ctx, st.ID)
+	require.NoError(t, err)
+	assert.Len(t, contacts, 2)
+
+	// Симметричная отвязка.
+	require.NoError(t, s.UnlinkContact(ctx, st.ID, u1.ID))
+	contacts, err = s.GetStudentContacts(ctx, st.ID)
+	require.NoError(t, err)
+	assert.Len(t, contacts, 1)
+	assert.Equal(t, u2.ID, contacts[0].UserID)
+
+	// Повторная отвязка несуществующей связи — ErrNotFound.
+	err = s.UnlinkContact(ctx, st.ID, u1.ID)
+	assert.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestEventLinkUnlink(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	st, _ := s.CreateStudent(ctx, "Петя")
+	require.NoError(t, s.LinkEvent(ctx, "evt-1", st.ID))
+
+	got, err := s.GetStudentForEvent(ctx, "evt-1")
+	require.NoError(t, err)
+	assert.Equal(t, st.ID, got.ID)
+
+	require.NoError(t, s.UnlinkEvent(ctx, "evt-1"))
+	_, err = s.GetStudentForEvent(ctx, "evt-1")
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	// Повторная отвязка — ErrNotFound.
+	err = s.UnlinkEvent(ctx, "evt-1")
+	assert.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestReminderDedup(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	u, _ := s.CreateUser(ctx, "U")
+
+	sent, err := s.ReminderSent(ctx, "inst-1", u.ID, "24h")
+	require.NoError(t, err)
+	assert.False(t, sent)
+
+	require.NoError(t, s.MarkReminderSent(ctx, "inst-1", u.ID, "24h"))
+
+	sent, err = s.ReminderSent(ctx, "inst-1", u.ID, "24h")
+	require.NoError(t, err)
+	assert.True(t, sent)
+
+	// Другой тип — ещё не отправлен.
+	sent, err = s.ReminderSent(ctx, "inst-1", u.ID, "2h")
+	require.NoError(t, err)
+	assert.False(t, sent)
+
+	// Повторный mark — без ошибки (ON CONFLICT DO NOTHING).
+	require.NoError(t, s.MarkReminderSent(ctx, "inst-1", u.ID, "24h"))
+}
+
+func TestUnlinkedUsers(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	u1, _ := s.CreateUser(ctx, "Без ученика")
+	u2, _ := s.CreateUser(ctx, "С учеником")
+	st, _ := s.CreateStudent(ctx, "Петя")
+	require.NoError(t, s.LinkContact(ctx, st.ID, u2.ID, "Папа"))
+
+	users, err := s.GetUnlinkedUsers(ctx)
+	require.NoError(t, err)
+	require.Len(t, users, 1)
+	assert.Equal(t, u1.ID, users[0].ID)
+}
+
+func TestStudentIntervals(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	st, _ := s.CreateStudent(ctx, "Петя")
+
+	require.NoError(t, s.SetStudentIntervals(ctx, st.ID, "1h,15m"))
+	got, err := s.getStudent(ctx, st.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "1h,15m", got.ReminderIntervals)
+
+	// Сброс на глобальные = пустая строка.
+	require.NoError(t, s.SetStudentIntervals(ctx, st.ID, ""))
+	got, err = s.getStudent(ctx, st.ID)
+	require.NoError(t, err)
+	assert.Empty(t, got.ReminderIntervals)
+
+	// Несуществующий ученик.
+	err = s.SetStudentIntervals(ctx, 9999, "1h")
+	assert.True(t, errors.Is(err, ErrNotFound))
+}
+
+func TestSettings(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.SetSetting(ctx, "key", "v1"))
+	v, err := s.GetSetting(ctx, "key")
+	require.NoError(t, err)
+	assert.Equal(t, "v1", v)
+
+	// Перезапись.
+	require.NoError(t, s.SetSetting(ctx, "key", "v2"))
+	v, _ = s.GetSetting(ctx, "key")
+	assert.Equal(t, "v2", v)
+
+	_, err = s.GetSetting(ctx, "missing")
+	assert.ErrorIs(t, err, ErrNotFound)
+}
