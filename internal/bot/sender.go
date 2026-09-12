@@ -15,11 +15,11 @@ const MessengerName = "telegram"
 
 // TelegramSender реализует notify.Sender поверх Telegram Bot API.
 type TelegramSender struct {
-	api *tgbotapi.BotAPI
+	api telegramAPI
 }
 
 // NewTelegramSender оборачивает существующий *tgbotapi.BotAPI в Sender.
-func NewTelegramSender(api *tgbotapi.BotAPI) *TelegramSender {
+func NewTelegramSender(api telegramAPI) *TelegramSender {
 	return &TelegramSender{api: api}
 }
 

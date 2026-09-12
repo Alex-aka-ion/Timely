@@ -13,12 +13,12 @@ import (
 // TelegramAdminUI — реализация admin.UI поверх Telegram.
 // Отправляет уведомления преподавателю с inline-кнопками для быстрых действий.
 type TelegramAdminUI struct {
-	api       *tgbotapi.BotAPI
+	api       telegramAPI
 	teacherID int64
 }
 
 // NewTelegramAdminUI создаёт UI, привязанный к конкретному telegram_id преподавателя.
-func NewTelegramAdminUI(api *tgbotapi.BotAPI, teacherID int64) *TelegramAdminUI {
+func NewTelegramAdminUI(api telegramAPI, teacherID int64) *TelegramAdminUI {
 	return &TelegramAdminUI{api: api, teacherID: teacherID}
 }
 

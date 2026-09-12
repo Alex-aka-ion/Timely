@@ -22,37 +22,40 @@ import (
 // Содержит все зависимости (store, calendar, dispatcher, FSM, лимитер).
 // Управление событиями делится по handler_parent / handler_teacher.
 type Handler struct {
-	api       *tgbotapi.BotAPI
-	cfg       *config.Config
-	store     store.Store
-	dialog    *Dialog
-	rl        *RateLimiter
-	dispatch  *notify.Dispatcher
-	adminUI   admin.UI
-	calClient calendar.Client
+	api         telegramAPI
+	botUsername string
+	cfg         *config.Config
+	store       store.Store
+	dialog      *Dialog
+	rl          *RateLimiter
+	dispatch    *notify.Dispatcher
+	adminUI     admin.UI
+	calClient   calendar.Client
 }
 
 // HandlerDeps — все зависимости Handler.
 type HandlerDeps struct {
-	API       *tgbotapi.BotAPI
-	Cfg       *config.Config
-	Store     store.Store
-	Dispatch  *notify.Dispatcher
-	AdminUI   admin.UI
-	CalClient calendar.Client
+	API         telegramAPI
+	BotUsername string
+	Cfg         *config.Config
+	Store       store.Store
+	Dispatch    *notify.Dispatcher
+	AdminUI     admin.UI
+	CalClient   calendar.Client
 }
 
 // NewHandler создаёт Handler с типичными значениями rate-limiter (5/мин).
 func NewHandler(d HandlerDeps) *Handler {
 	return &Handler{
-		api:       d.API,
-		cfg:       d.Cfg,
-		store:     d.Store,
-		dialog:    NewDialog(),
-		rl:        NewRateLimiter(5, time.Minute),
-		dispatch:  d.Dispatch,
-		adminUI:   d.AdminUI,
-		calClient: d.CalClient,
+		api:         d.API,
+		botUsername: d.BotUsername,
+		cfg:         d.Cfg,
+		store:       d.Store,
+		dialog:      NewDialog(),
+		rl:          NewRateLimiter(5, time.Minute),
+		dispatch:    d.Dispatch,
+		adminUI:     d.AdminUI,
+		calClient:   d.CalClient,
 	}
 }
 
@@ -64,7 +67,7 @@ func (h *Handler) Run(ctx context.Context) error {
 	updates := h.api.GetUpdatesChan(u)
 	defer h.api.StopReceivingUpdates()
 
-	log.Info("bot started", "username", h.api.Self.UserName)
+	log.Info("bot started", "username", h.botUsername)
 
 	for {
 		select {

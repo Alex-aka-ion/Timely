@@ -111,12 +111,13 @@ func main() {
 
 	// Bot Handler.
 	handler := bot.NewHandler(bot.HandlerDeps{
-		API:       tgAPI,
-		Cfg:       cfg,
-		Store:     st,
-		Dispatch:  dispatcher,
-		AdminUI:   adminUI,
-		CalClient: calClient,
+		API:         tgAPI,
+		BotUsername: tgAPI.Self.UserName,
+		Cfg:         cfg,
+		Store:       st,
+		Dispatch:    dispatcher,
+		AdminUI:     adminUI,
+		CalClient:   calClient,
 	})
 
 	// Scheduler.

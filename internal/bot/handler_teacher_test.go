@@ -24,8 +24,10 @@ func newTestStore(t *testing.T) store.Store {
 	return s
 }
 
-// makeHandler — Handler с in-memory store и без реального API/Calendar.
-// API оставляем nil — мы тестируем только проверки роли.
+// makeHandler — Handler с in-memory store и без реального Calendar.
+// API — fakeTelegramAPI: не ходит в сеть, но и не паникует на вызовах
+// Send/Request/answerCallback, которые случаются даже для заблокированных
+// (не-teacher) пользователей — так того требует протокол Telegram.
 func makeHandler(t *testing.T) *Handler {
 	t.Helper()
 	cfg := &config.Config{
@@ -34,6 +36,7 @@ func makeHandler(t *testing.T) *Handler {
 		SchedulerTick:     time.Minute,
 	}
 	return NewHandler(HandlerDeps{
+		API:     &fakeTelegramAPI{},
 		Cfg:     cfg,
 		Store:   newTestStore(t),
 		AdminUI: admin.Noop{},
