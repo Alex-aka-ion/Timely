@@ -31,6 +31,7 @@ type Handler struct {
 	dispatch    *notify.Dispatcher
 	adminUI     admin.UI
 	calClient   calendar.Client
+	eventTokens *eventTokens
 }
 
 // HandlerDeps — все зависимости Handler.
@@ -56,6 +57,7 @@ func NewHandler(d HandlerDeps) *Handler {
 		dispatch:    d.Dispatch,
 		adminUI:     d.AdminUI,
 		calClient:   d.CalClient,
+		eventTokens: newEventTokens(),
 	}
 }
 

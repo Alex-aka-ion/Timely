@@ -122,22 +122,10 @@ func (h *Handler) handleEvents(ctx context.Context, msg *tgbotapi.Message) {
 		h.send(msg.From.ID, "Не удалось получить события из календаря.")
 		return
 	}
-	// Фильтруем те, где уже есть привязка, и такие, чей ID не поместится в
-	// callback_data кнопки: у Telegram лимит 64 байта на всю строку, а
-	// "pick_event:" уже занимает 11 из них. Без этой проверки одно "длинное"
-	// событие (обычно это что-то, импортированное в календарь из другого
-	// сервиса — там ID не гугловский и может быть намного длиннее) ломает
-	// отправку сразу всего списка: Telegram отклоняет целиком набор кнопок,
-	// если хоть одна из них невалидна.
-	const maxCallbackDataLen = 64
+	// Фильтруем те, где уже есть привязка.
 	var unlinked []eventListItem
 	for _, e := range events {
 		if _, err := h.store.GetStudentForEvent(ctx, e.ID); !errors.Is(err, store.ErrNotFound) {
-			continue
-		}
-		if n := len(cbPickEvent) + 1 + len(e.ID); n > maxCallbackDataLen {
-			logger.FromContext(ctx).Warn("событие пропущено в /events — слишком длинный ID для кнопки",
-				"summary", e.Summary, "id_len", len(e.ID))
 			continue
 		}
 		unlinked = append(unlinked, eventListItem{ID: e.ID, Label: formatEvent(e.Start, e.Summary)})
@@ -146,10 +134,13 @@ func (h *Handler) handleEvents(ctx context.Context, msg *tgbotapi.Message) {
 		h.send(msg.From.ID, "Все ближайшие события уже привязаны.")
 		return
 	}
+	// В кнопку кладём не сам ID события, а короткий токен (см. eventtoken.go) —
+	// event ID может быть длиннее 64-байтного лимита callback_data Telegram.
 	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(unlinked))
 	for _, e := range unlinked {
+		token := h.eventTokens.tokenFor(e.ID)
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(e.Label, cbPickEvent+":"+e.ID),
+			tgbotapi.NewInlineKeyboardButtonData(e.Label, cbPickEvent+":"+token),
 		))
 	}
 	out := tgbotapi.NewMessage(msg.From.ID, "Выберите событие:")
@@ -463,7 +454,14 @@ func (h *Handler) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery
 
 	case cbPickEvent:
 		// Пользователь выбрал событие — показываем учеников.
-		eid := rest
+		// rest — короткий токен из eventtoken.go, не сам event ID.
+		token := rest
+		if _, ok := h.eventTokens.resolve(token); !ok {
+			// Бот перезапускали после того, как список /events был показан —
+			// токены не персистентные (см. eventtoken.go).
+			h.answerCallback(cb.ID, "Список устарел, вызовите /events заново")
+			return
+		}
 		students, err := h.store.GetStudents(ctx)
 		if err != nil {
 			log.Error("GetStudents", "error", err)
@@ -481,7 +479,8 @@ func (h *Handler) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery
 			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData(
 					s.DisplayName,
-					fmt.Sprintf("%s:%s:%d", cbPickStudent, eid, s.ID),
+					// token, а не сам event ID — та же причина, что в /events.
+					fmt.Sprintf("%s:%s:%d", cbPickStudent, token, s.ID),
 				),
 			))
 		}
@@ -491,20 +490,22 @@ func (h *Handler) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery
 		h.answerCallback(cb.ID, "")
 
 	case cbPickStudent:
-		// формат: cbPickStudent:event_id:student_id
-		// event_id может содержать символы, поэтому split с ограничением.
+		// формат: cbPickStudent:token:student_id
 		args := strings.Split(rest, ":")
-		if len(args) < 2 {
+		if len(args) != 2 {
 			h.answerCallback(cb.ID, "Неверные данные")
 			return
 		}
-		// последний элемент — student_id; остальное — event_id (на случай, если в id есть ':').
-		sid, err := strconv.ParseInt(args[len(args)-1], 10, 64)
+		sid, err := strconv.ParseInt(args[1], 10, 64)
 		if err != nil {
 			h.answerCallback(cb.ID, "Неверные данные")
 			return
 		}
-		eid := strings.Join(args[:len(args)-1], ":")
+		eid, ok := h.eventTokens.resolve(args[0])
+		if !ok {
+			h.answerCallback(cb.ID, "Список устарел, вызовите /events заново")
+			return
+		}
 		if err := h.store.LinkEvent(ctx, eid, sid); err != nil {
 			log.Error("LinkEvent", "error", err)
 			h.answerCallback(cb.ID, "Ошибка")
