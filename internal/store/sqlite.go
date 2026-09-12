@@ -422,6 +422,61 @@ func (s *SQLiteStore) MarkReminderSent(ctx context.Context, instanceID string, u
 	return err
 }
 
+func (s *SQLiteStore) ClearRemindersForInstance(ctx context.Context, instanceEventID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM sent_reminders WHERE instance_event_id = ?`, instanceEventID)
+	return err
+}
+
+// --- event state (для уведомлений об изменениях) ----------------------------
+
+func (s *SQLiteStore) GetEventState(ctx context.Context, instanceEventID string) (EventState, error) {
+	var st EventState
+	var notified int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT instance_event_id, start_time, notified_cancelled
+		FROM event_state WHERE instance_event_id = ?
+	`, instanceEventID).Scan(&st.InstanceEventID, &st.Start, &notified)
+	if errors.Is(err, sql.ErrNoRows) {
+		return EventState{}, ErrNotFound
+	}
+	if err != nil {
+		return EventState{}, err
+	}
+	st.NotifiedCancelled = notified != 0
+	return st, nil
+}
+
+// SaveEventState — upsert: сбрасывает notified_cancelled в 0, так что если
+// "отменённое" событие вдруг снова стало активным (Google это позволяет —
+// восстановление из корзины Calendar в течение некоторого времени), новая
+// отмена в будущем снова будет замечена и разослана.
+func (s *SQLiteStore) SaveEventState(ctx context.Context, instanceEventID string, start time.Time) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO event_state (instance_event_id, start_time, notified_cancelled, updated_at)
+		VALUES (?, ?, 0, ?)
+		ON CONFLICT(instance_event_id) DO UPDATE SET
+			start_time = excluded.start_time,
+			notified_cancelled = 0,
+			updated_at = excluded.updated_at
+	`, instanceEventID, start.UTC(), time.Now().UTC())
+	return err
+}
+
+func (s *SQLiteStore) MarkEventCancelled(ctx context.Context, instanceEventID string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE event_state SET notified_cancelled = 1, updated_at = ? WHERE instance_event_id = ?`,
+		time.Now().UTC(), instanceEventID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // --- settings ---------------------------------------------------------------
 
 func (s *SQLiteStore) GetSetting(ctx context.Context, key string) (string, error) {

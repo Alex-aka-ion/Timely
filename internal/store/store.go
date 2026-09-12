@@ -56,6 +56,17 @@ type EventLink struct {
 	AddedAt       time.Time
 }
 
+// EventState — последнее известное планировщику состояние конкретного
+// instance события Calendar (не мастер-события: у каждого повторения своя
+// запись). Используется, чтобы заметить перенос времени или отмену занятия
+// и уведомить родителей — Calendar API сам такие уведомления не присылает,
+// только текущий снимок состояния.
+type EventState struct {
+	InstanceEventID   string
+	Start             time.Time
+	NotifiedCancelled bool
+}
+
 // Store — единая точка доступа к хранилищу.
 //
 // Все операции принимают context для возможности отмены / таймаутов.
@@ -116,6 +127,28 @@ type Store interface {
 	// ReminderSent возвращает true если напоминание уже отправлялось.
 	ReminderSent(ctx context.Context, instanceID string, userID int64, reminderType string) (bool, error)
 	MarkReminderSent(ctx context.Context, instanceID string, userID int64, reminderType string) error
+
+	// ClearRemindersForInstance удаляет отметки об уже отправленных
+	// напоминаниях для instance. Нужно при переносе времени: иначе
+	// напоминание, отправленное под старое время начала, помешает через
+	// ReminderSent отправить его заново под новое — дедупликация не
+	// различает "старое" и "новое" время одного и того же instance.
+	ClearRemindersForInstance(ctx context.Context, instanceEventID string) error
+
+	// event state (для уведомлений об изменениях) --------------------------
+
+	// GetEventState возвращает последнее известное состояние instance.
+	// ErrNotFound значит, что это первое появление instance в системе —
+	// вызывающий код в этом случае не уведомляет, а сохраняет точку отсчёта.
+	GetEventState(ctx context.Context, instanceEventID string) (EventState, error)
+
+	// SaveEventState сохраняет/обновляет известное время начала instance —
+	// используется и при первом сохранении, и при переносе времени.
+	SaveEventState(ctx context.Context, instanceEventID string, start time.Time) error
+
+	// MarkEventCancelled помечает instance уведомлённым об отмене, чтобы не
+	// слать повторное уведомление на каждом следующем тике планировщика.
+	MarkEventCancelled(ctx context.Context, instanceEventID string) error
 
 	// settings -------------------------------------------------------------
 

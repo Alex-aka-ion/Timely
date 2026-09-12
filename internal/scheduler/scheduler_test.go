@@ -186,9 +186,15 @@ func TestScheduler_UsesStudentIntervals(t *testing.T) {
 	sc.runOnce(context.Background())
 	assert.Equal(t, 0, r.sender.total(), "глобальный 2h не должен срабатывать для ученика")
 
-	// А через 30m — должно сработать.
-	cal.instances[0].Start = now.Add(30 * time.Minute)
-	cal.instances[0].End = now.Add(time.Hour + 30*time.Minute)
+	// А через 30m — должно сработать. Берём новый ID инстанса, а не мутируем
+	// Start у "inst-1": иначе detectChange (см. scheduler.go) воспримет это
+	// как реальный перенос времени занятия и лишний раз уведомит родителя,
+	// сломав проверку ниже (ожидаем ровно 1 отправку — обычное напоминание).
+	cal.instances[0] = calendar.Instance{
+		ID: "inst-2", MasterID: r.masterID,
+		Start: now.Add(30 * time.Minute), End: now.Add(time.Hour + 30*time.Minute),
+		Status: calendar.StatusConfirmed,
+	}
 	sc.runOnce(context.Background())
 	assert.Equal(t, 1, r.sender.total())
 }
@@ -269,12 +275,92 @@ func TestScheduler_FallsBackToGlobal(t *testing.T) {
 	assert.Equal(t, 1, r.sender.total())
 }
 
+// 10. Первое появление instance — не уведомление, а точка отсчёта.
+// Событие вне окна напоминаний (иначе сработало бы обычное напоминание,
+// и тест перестал бы проверять именно detectChange).
+func TestScheduler_FirstSightingNoNotification(t *testing.T) {
+	r := setup(t)
+	now := time.Date(2026, 4, 26, 10, 0, 0, 0, time.UTC)
+	cal := &fakeCalendar{instances: []calendar.Instance{
+		{ID: "inst-1", MasterID: r.masterID, Summary: "Занятие",
+			Start: now.Add(10 * time.Hour), End: now.Add(11 * time.Hour),
+			Status: calendar.StatusConfirmed},
+	}}
+	sc := makeScheduler(t, r, cal, now)
+	sc.runOnce(context.Background())
+	assert.Equal(t, 0, r.sender.total(), "первое появление instance не должно уведомлять")
+}
+
+// 11. Перенос времени того же instance уведомляет родителя ровно один раз.
+func TestScheduler_NotifiesOnReschedule(t *testing.T) {
+	r := setup(t)
+	now := time.Date(2026, 4, 26, 10, 0, 0, 0, time.UTC)
+	cal := &fakeCalendar{instances: []calendar.Instance{
+		{ID: "inst-1", MasterID: r.masterID, Summary: "Занятие",
+			Start: now.Add(10 * time.Hour), End: now.Add(11 * time.Hour),
+			Status: calendar.StatusConfirmed},
+	}}
+	sc := makeScheduler(t, r, cal, now)
+
+	sc.runOnce(context.Background()) // точка отсчёта, без уведомления
+	require.Equal(t, 0, r.sender.total())
+
+	// Преподаватель перенёс занятие на другое время того же instance.
+	cal.instances[0].Start = now.Add(9 * time.Hour)
+	sc.runOnce(context.Background())
+	assert.Equal(t, 1, r.sender.total(), "перенос времени должен уведомить один раз")
+
+	// Следующий тик без изменений — повторного уведомления быть не должно.
+	sc.runOnce(context.Background())
+	assert.Equal(t, 1, r.sender.total(), "без изменений повторного уведомления быть не должно")
+}
+
+// 12. Отмена занятия уведомляет родителя ровно один раз, даже если
+// отменённый instance продолжает попадаться планировщику на следующих тиках.
+func TestScheduler_NotifiesOnCancellation(t *testing.T) {
+	r := setup(t)
+	now := time.Date(2026, 4, 26, 10, 0, 0, 0, time.UTC)
+	cal := &fakeCalendar{instances: []calendar.Instance{
+		{ID: "inst-1", MasterID: r.masterID, Summary: "Занятие",
+			Start: now.Add(10 * time.Hour), End: now.Add(11 * time.Hour),
+			Status: calendar.StatusConfirmed},
+	}}
+	sc := makeScheduler(t, r, cal, now)
+
+	sc.runOnce(context.Background()) // точка отсчёта
+	require.Equal(t, 0, r.sender.total())
+
+	cal.instances[0].Status = calendar.StatusCancelled
+	sc.runOnce(context.Background())
+	assert.Equal(t, 1, r.sender.total(), "отмена должна уведомить один раз")
+
+	// Google Calendar какое-то время продолжает отдавать отменённое событие —
+	// повторного уведомления на следующих тиках быть не должно.
+	sc.runOnce(context.Background())
+	assert.Equal(t, 1, r.sender.total(), "повторного уведомления об отмене быть не должно")
+}
+
+// 13. Если instance с самого первого появления уже отменён — уведомлять
+// не о чем: мы никогда не видели его "активным" и родителю нечего сравнивать.
+func TestScheduler_CancelledOnFirstSightingNoNotification(t *testing.T) {
+	r := setup(t)
+	now := time.Date(2026, 4, 26, 10, 0, 0, 0, time.UTC)
+	cal := &fakeCalendar{instances: []calendar.Instance{
+		{ID: "inst-1", MasterID: r.masterID, Summary: "Занятие",
+			Start: now.Add(10 * time.Hour), End: now.Add(11 * time.Hour),
+			Status: calendar.StatusCancelled},
+	}}
+	sc := makeScheduler(t, r, cal, now)
+	sc.runOnce(context.Background())
+	assert.Equal(t, 0, r.sender.total())
+}
+
 func TestHumanInterval(t *testing.T) {
 	tests := map[time.Duration]string{
-		24 * time.Hour:     "1 дн",
-		2 * time.Hour:      "2 ч",
-		30 * time.Minute:   "30 мин",
-		48 * time.Hour:     "2 дн",
+		24 * time.Hour:   "1 дн",
+		2 * time.Hour:    "2 ч",
+		30 * time.Minute: "30 мин",
+		48 * time.Hour:   "2 дн",
 	}
 	for d, want := range tests {
 		assert.Equal(t, want, humanInterval(d))
