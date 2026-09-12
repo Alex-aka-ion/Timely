@@ -122,12 +122,25 @@ func (h *Handler) handleEvents(ctx context.Context, msg *tgbotapi.Message) {
 		h.send(msg.From.ID, "Не удалось получить события из календаря.")
 		return
 	}
-	// Фильтруем те, где уже есть привязка.
+	// Фильтруем те, где уже есть привязка, и такие, чей ID не поместится в
+	// callback_data кнопки: у Telegram лимит 64 байта на всю строку, а
+	// "pick_event:" уже занимает 11 из них. Без этой проверки одно "длинное"
+	// событие (обычно это что-то, импортированное в календарь из другого
+	// сервиса — там ID не гугловский и может быть намного длиннее) ломает
+	// отправку сразу всего списка: Telegram отклоняет целиком набор кнопок,
+	// если хоть одна из них невалидна.
+	const maxCallbackDataLen = 64
 	var unlinked []eventListItem
 	for _, e := range events {
-		if _, err := h.store.GetStudentForEvent(ctx, e.ID); errors.Is(err, store.ErrNotFound) {
-			unlinked = append(unlinked, eventListItem{ID: e.ID, Label: formatEvent(e.Start, e.Summary)})
+		if _, err := h.store.GetStudentForEvent(ctx, e.ID); !errors.Is(err, store.ErrNotFound) {
+			continue
 		}
+		if n := len(cbPickEvent) + 1 + len(e.ID); n > maxCallbackDataLen {
+			logger.FromContext(ctx).Warn("событие пропущено в /events — слишком длинный ID для кнопки",
+				"summary", e.Summary, "id_len", len(e.ID))
+			continue
+		}
+		unlinked = append(unlinked, eventListItem{ID: e.ID, Label: formatEvent(e.Start, e.Summary)})
 	}
 	if len(unlinked) == 0 {
 		h.send(msg.From.ID, "Все ближайшие события уже привязаны.")
