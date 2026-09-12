@@ -24,6 +24,15 @@ func (h *Handler) handleStart(ctx context.Context, msg *tgbotapi.Message) {
 	log := logger.FromContext(ctx)
 	from := msg.From
 
+	// Преподаватель регистрацию как родитель не проходит. Без этой проверки
+	// /start поставил бы ему StateAwaitingName, а его следующий текстовый
+	// ответ ушёл бы в handleTeacherMessage (маршрутизация по isTeacher в
+	// handleUpdate) — там такого состояния нет, и он завис бы без ответа.
+	if h.isTeacher(from.ID) {
+		h.send(from.ID, "Вы вошли как преподаватель — регистрация родителя не нужна.")
+		return
+	}
+
 	if !h.rl.Allow(from.ID) {
 		log.Warn("rate limit", "user_id", from.ID)
 		return
