@@ -1,5 +1,14 @@
 services:
   booking-bot:
+    # И image, и build сразу — совмещает два сценария одним файлом:
+    #   - вручную на сервере (`docker compose up -d --build`, см. README) —
+    #     собирается из Dockerfile локально, как и раньше;
+    #   - автодеплой из GitHub Actions (.github/workflows/deploy.yml) —
+    #     `docker compose pull` тянет уже собранный на раннере образ под
+    #     этим тегом, `up -d` без --build запускает его без пересборки на
+    #     самом VDS.
+    # Тег должен совпадать с IMAGE в deploy.yml.
+    image: ghcr.io/alex-aka-ion/timely:latest
     build: .
     container_name: booking-bot
     restart: unless-stopped

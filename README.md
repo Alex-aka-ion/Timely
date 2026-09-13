@@ -144,6 +144,53 @@ docker compose logs -f
 контейнера) и `credentials.json`/`token.json` — read-only. Обновление после
 `git pull`: `docker compose up -d --build`.
 
+#### Автодеплой из GitHub Actions
+
+После настройки ниже каждый push в `main` сам гонит тесты, собирает образ и
+перезапускает контейнер на сервере — руками `git pull`/`docker compose
+up -d --build` там больше не нужны. Пайплайн: `.github/workflows/deploy.yml`.
+
+**1. Пакет в GHCR — сделать публичным.** Первый успешный прогон workflow
+сам создаст пакет `ghcr.io/alex-aka-ion/timely`, но по умолчанию GitHub
+делает такие пакеты приватными — тогда `docker compose pull` на сервере
+откажет без авторизации. Проще всего сделать пакет публичным (в образе нет
+секретов — `.dockerignore` не даёт `.env`/`credentials.json`/`token.json`
+попасть в слои, см. Dockerfile): после первого прогона зайдите в
+`github.com/Alex-aka-ion/Timely` → Packages → `timely` → Package settings
+→ Change visibility → Public. Не хотите публичный образ — вместо этого
+шага один раз выполните `docker login ghcr.io` на сервере с personal access
+token (scope `read:packages`).
+
+**2. Отдельный SSH-ключ для деплоя** (не личный ключ с ноутбука/Мака — если
+его когда-нибудь придётся отозвать, это не должно требовать переустановки
+доступа человека):
+
+```bash
+# Локально
+ssh-keygen -t ed25519 -f deploy_key -N "" -C "github-actions-deploy"
+
+# На сервере — добавить публичный ключ тому пользователю, что уже владеет
+# /opt/booking-bot (см. владельца ./data, шаг 3 выше)
+cat deploy_key.pub | ssh user@server "cat >> ~/.ssh/authorized_keys"
+```
+
+**3. Secrets репозитория** — `github.com/Alex-aka-ion/Timely` → Settings →
+Secrets and variables → Actions → New repository secret:
+
+| Secret | Значение |
+|---|---|
+| `DEPLOY_HOST` | IP или домен VDS |
+| `DEPLOY_USER` | тот же пользователь, что в шаге 2 |
+| `DEPLOY_SSH_KEY` | содержимое `deploy_key` (приватный, не `.pub`!) целиком |
+| `DEPLOY_PORT` | нужен, только если SSH не на 22 |
+
+`GITHUB_TOKEN` для публикации в GHCR отдельно заводить не нужно — GitHub
+выдаёт его каждому запуску workflow сам (см. `permissions: packages:
+write` в deploy.yml).
+
+После этого `git push` в `main` — единственное действие, которое требуется
+для выката изменений.
+
 #### Бэкапы (Docker)
 
 БД лежит в `/opt/booking-bot/data/booking.db` на самом хосте (bind mount) —
