@@ -198,6 +198,30 @@ func formatEvent(start time.Time, summary string) string {
 	return fmt.Sprintf("%s — %s", start.Local().Format("Mon 02.01 15:04"), summary)
 }
 
+// eventLabel возвращает человекочитаемое название события для кнопки
+// "Отвязать событие". У event_students хранится только master_event_id —
+// ни время, ни название (та же причина, что в notifyContactsAboutNewEvent),
+// поэтому пытаемся найти событие свежим списком UpcomingMasters. Если
+// календарь недоступен или событие вне горизонта (например, уже в прошлом
+// либо серия закончилась) — показываем сокращённый ID, этого достаточно
+// чтобы отличить одну кнопку от другой в списке.
+func (h *Handler) eventLabel(ctx context.Context, masterEventID string) string {
+	if h.calClient != nil {
+		if events, err := h.calClient.UpcomingMasters(ctx, h.cfg.GoogleCalendarID, upcomingHorizon); err == nil {
+			for _, e := range events {
+				if e.ID == masterEventID {
+					return formatEvent(e.Start, e.Summary)
+				}
+			}
+		}
+	}
+	id := masterEventID
+	if len(id) > 12 {
+		id = id[:12] + "…"
+	}
+	return id
+}
+
 // --- /settings --------------------------------------------------------------
 
 func (h *Handler) handleSettings(ctx context.Context, msg *tgbotapi.Message) {
@@ -485,17 +509,60 @@ func (h *Handler) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery
 		h.editText(cb.Message.Chat.ID, cb.Message.MessageID, "Контакт отвязан.", nil)
 		h.answerCallback(cb.ID, "Готово")
 
+	case cbStudentEvents:
+		sid, err := strconv.ParseInt(rest, 10, 64)
+		if err != nil {
+			h.answerCallback(cb.ID, "")
+			return
+		}
+		links, err := h.store.GetStudentEvents(ctx, sid)
+		if err != nil {
+			log.Error("GetStudentEvents", "error", err)
+			h.answerCallback(cb.ID, "Ошибка")
+			return
+		}
+		if len(links) == 0 {
+			h.editText(cb.Message.Chat.ID, cb.Message.MessageID, "К ученику не привязано ни одного события.", nil)
+			h.answerCallback(cb.ID, "")
+			return
+		}
+		rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(links))
+		for _, l := range links {
+			// token, а не сам event ID — та же причина, что в /events
+			// (см. eventtoken.go): ID может быть длиннее 64-байтного лимита
+			// callback_data.
+			token := h.eventTokens.tokenFor(l.MasterEventID)
+			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData(
+					"Отвязать: "+h.eventLabel(ctx, l.MasterEventID),
+					cbUnlinkEvent+":"+token,
+				),
+			))
+		}
+		kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
+		h.editText(cb.Message.Chat.ID, cb.Message.MessageID, "События ученика:", &kb)
+		h.answerCallback(cb.ID, "")
+
 	case cbUnlinkEvent:
-		// Подтверждение.
-		eid := rest
-		confirmCB := cbUnlinkEventC + ":" + eid
+		// Подтверждение. rest — токен из eventtoken.go, не сам event ID.
+		token := rest
+		if _, ok := h.eventTokens.resolve(token); !ok {
+			h.answerCallback(cb.ID, "Список устарел, откройте карточку ученика заново")
+			return
+		}
+		confirmCB := cbUnlinkEventC + ":" + token
 		kb := kbConfirm(confirmCB, cbCancel)
 		h.editText(cb.Message.Chat.ID, cb.Message.MessageID,
 			"Точно отвязать событие? Напоминания прекратятся.", &kb)
 		h.answerCallback(cb.ID, "")
 
 	case cbUnlinkEventC:
-		eid := rest
+		token := rest
+		eid, ok := h.eventTokens.resolve(token)
+		if !ok {
+			h.answerCallback(cb.ID, "Список устарел, откройте карточку ученика заново")
+			return
+		}
 		if err := h.store.UnlinkEvent(ctx, eid); err != nil && !errors.Is(err, store.ErrNotFound) {
 			log.Error("UnlinkEvent", "error", err)
 			h.answerCallback(cb.ID, "Ошибка")

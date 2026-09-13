@@ -350,6 +350,28 @@ func (s *SQLiteStore) GetStudentForEvent(ctx context.Context, masterEventID stri
 	return st, nil
 }
 
+func (s *SQLiteStore) GetStudentEvents(ctx context.Context, studentID int64) ([]EventLink, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT master_event_id, student_id, added_at
+		FROM event_students
+		WHERE student_id = ?
+		ORDER BY added_at
+	`, studentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []EventLink
+	for rows.Next() {
+		var el EventLink
+		if err := rows.Scan(&el.MasterEventID, &el.StudentID, &el.AddedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, el)
+	}
+	return out, rows.Err()
+}
+
 func (s *SQLiteStore) GetStudentContacts(ctx context.Context, studentID int64) ([]Contact, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT u.id, u.full_name, COALESCE(sc.label, ''), sc.added_at

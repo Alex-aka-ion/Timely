@@ -195,6 +195,37 @@ func TestEventLinkUnlink(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNotFound)
 }
 
+// TestGetStudentEvents — обратная выборка к GetStudentForEvent: у одного
+// ученика может быть больше одного привязанного мастер-события (например,
+// две разные повторяющиеся серии).
+func TestGetStudentEvents(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	st, _ := s.CreateStudent(ctx, "Петя")
+	other, _ := s.CreateStudent(ctx, "Маша")
+
+	links, err := s.GetStudentEvents(ctx, st.ID)
+	require.NoError(t, err)
+	assert.Empty(t, links)
+
+	require.NoError(t, s.LinkEvent(ctx, "evt-1", st.ID))
+	require.NoError(t, s.LinkEvent(ctx, "evt-2", st.ID))
+	require.NoError(t, s.LinkEvent(ctx, "evt-3", other.ID))
+
+	links, err = s.GetStudentEvents(ctx, st.ID)
+	require.NoError(t, err)
+	require.Len(t, links, 2)
+	ids := []string{links[0].MasterEventID, links[1].MasterEventID}
+	assert.ElementsMatch(t, []string{"evt-1", "evt-2"}, ids)
+
+	require.NoError(t, s.UnlinkEvent(ctx, "evt-1"))
+	links, err = s.GetStudentEvents(ctx, st.ID)
+	require.NoError(t, err)
+	require.Len(t, links, 1)
+	assert.Equal(t, "evt-2", links[0].MasterEventID)
+}
+
 func TestReminderDedup(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

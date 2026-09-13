@@ -117,6 +117,13 @@ type Store interface {
 	// ErrNotFound если событие не привязано.
 	GetStudentForEvent(ctx context.Context, masterEventID string) (Student, error)
 
+	// GetStudentEvents возвращает все события, привязанные к ученику —
+	// обратная выборка к GetStudentForEvent. Нужна для карточки ученика
+	// (кнопка "Отвязать событие" из финального плана): у одного ученика
+	// может быть больше одного привязанного мастер-события (например, две
+	// разные повторяющиеся серии).
+	GetStudentEvents(ctx context.Context, studentID int64) ([]EventLink, error)
+
 	// GetStudentContacts возвращает всех родителей ученика.
 	GetStudentContacts(ctx context.Context, studentID int64) ([]Contact, error)
 

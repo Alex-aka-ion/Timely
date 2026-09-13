@@ -221,6 +221,86 @@ func TestStudentDetails_WithContacts(t *testing.T) {
 	assert.Contains(t, text, "Мама")
 }
 
+// --- "Отвязать событие" (карточка ученика) ----------------------------------
+
+// TestCallback_StudentEvents_NoEvents — у ученика без привязанных событий
+// список должен сказать об этом, а не показать пустую клавиатуру.
+func TestCallback_StudentEvents_NoEvents(t *testing.T) {
+	h := makeHandler(t)
+	ctx := context.Background()
+	s, err := h.store.CreateStudent(ctx, "Петя")
+	require.NoError(t, err)
+
+	cb := &tgbotapi.CallbackQuery{
+		ID:      "cb1",
+		From:    &tgbotapi.User{ID: 999},
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: 999}, MessageID: 1},
+		Data:    cbStudentEvents + ":" + itoa(s.ID),
+	}
+	h.handleCallback(ctx, cb)
+
+	api := h.api.(*fakeTelegramAPI)
+	last := lastEdit(t, api)
+	assert.Contains(t, last.Text, "не привязано ни одного события")
+}
+
+// TestCallback_StudentEvents_UnlinkFlow — полный сценарий: у ученика есть
+// привязанное событие → "Отвязать событие" показывает его кнопкой →
+// нажатие → подтверждение → UnlinkEvent действительно снимает привязку.
+// Проверяем заодно, что callback_data кладёт короткий токен (eventtoken.go),
+// а не сам master_event_id — так же, как в /events.
+func TestCallback_StudentEvents_UnlinkFlow(t *testing.T) {
+	h := makeHandler(t)
+	ctx := context.Background()
+	s, err := h.store.CreateStudent(ctx, "Петя")
+	require.NoError(t, err)
+	const masterEventID = "evt-1"
+	require.NoError(t, h.store.LinkEvent(ctx, masterEventID, s.ID))
+
+	cb := &tgbotapi.CallbackQuery{
+		ID:      "cb1",
+		From:    &tgbotapi.User{ID: 999},
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: 999}, MessageID: 1},
+		Data:    cbStudentEvents + ":" + itoa(s.ID),
+	}
+	h.handleCallback(ctx, cb)
+
+	api := h.api.(*fakeTelegramAPI)
+	list := lastEdit(t, api)
+	require.Len(t, list.ReplyMarkup.InlineKeyboard, 1)
+	unlinkCB := list.ReplyMarkup.InlineKeyboard[0][0].CallbackData
+	require.NotNil(t, unlinkCB)
+	assert.NotContains(t, *unlinkCB, masterEventID, "callback_data должен содержать токен, а не сам event ID")
+
+	// Нажатие "Отвязать: ..." → запрос подтверждения.
+	cb.Data = *unlinkCB
+	h.handleCallback(ctx, cb)
+	confirm := lastEdit(t, api)
+	assert.Contains(t, confirm.Text, "Точно отвязать событие")
+	require.Len(t, confirm.ReplyMarkup.InlineKeyboard, 1)
+	confirmCB := confirm.ReplyMarkup.InlineKeyboard[0][0].CallbackData
+	require.NotNil(t, confirmCB)
+
+	// Подтверждение → реальная отвязка в store.
+	cb.Data = *confirmCB
+	h.handleCallback(ctx, cb)
+	done := lastEdit(t, api)
+	assert.Contains(t, done.Text, "отвязано")
+
+	_, err = h.store.GetStudentForEvent(ctx, masterEventID)
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}
+
+// lastEdit достаёт последнее отправленное EditMessageTextConfig — то, чем
+// editText() обновляет сообщение с inline-клавиатурой.
+func lastEdit(t *testing.T, api *fakeTelegramAPI) tgbotapi.EditMessageTextConfig {
+	t.Helper()
+	require.NotEmpty(t, api.sent)
+	edit, ok := api.sent[len(api.sent)-1].(tgbotapi.EditMessageTextConfig)
+	require.True(t, ok, "последний Send должен быть EditMessageTextConfig")
+	return edit
+}
+
 func TestParseCallback_OK(t *testing.T) {
 	prefix, args, ok := parseCallback("foo:1:2")
 	require.True(t, ok)
