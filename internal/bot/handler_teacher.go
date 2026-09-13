@@ -510,12 +510,7 @@ func (h *Handler) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery
 			h.answerCallback(cb.ID, "Ошибка")
 			return
 		}
-		if len(contacts) == 0 {
-			h.editText(cb.Message.Chat.ID, cb.Message.MessageID, "Контактов нет.", nil)
-			h.answerCallback(cb.ID, "")
-			return
-		}
-		rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(contacts))
+		rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(contacts)+1)
 		for _, c := range contacts {
 			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData(
@@ -524,8 +519,76 @@ func (h *Handler) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery
 				),
 			))
 		}
+		// Всегда доступна, даже когда контактов ещё нет — раньше это был
+		// тупик ("Контактов нет." без единой кнопки): чтобы привязать
+		// родителя, который уже зарегистрирован (например, водит к нам
+		// второго ребёнка на другое время), не было вообще никакого пути в
+		// интерфейсе, кроме как ждать, что он снова напишет боту /start.
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("➕ Добавить родителя", fmt.Sprintf("%s:%d", cbAddContact, sid)),
+		))
+		text := "Контакты ученика:"
+		if len(contacts) == 0 {
+			text = "Контактов нет."
+		}
 		kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
-		h.editText(cb.Message.Chat.ID, cb.Message.MessageID, "Контакты ученика:", &kb)
+		h.editText(cb.Message.Chat.ID, cb.Message.MessageID, text, &kb)
+		h.answerCallback(cb.ID, "")
+
+	case cbAddContact:
+		sid, err := strconv.ParseInt(rest, 10, 64)
+		if err != nil {
+			h.answerCallback(cb.ID, "")
+			return
+		}
+		users, err := h.store.GetAllUsers(ctx)
+		if err != nil {
+			log.Error("GetAllUsers", "error", err)
+			h.answerCallback(cb.ID, "Ошибка")
+			return
+		}
+		existing, err := h.store.GetStudentContacts(ctx, sid)
+		if err != nil {
+			log.Error("GetStudentContacts", "error", err)
+			h.answerCallback(cb.ID, "Ошибка")
+			return
+		}
+		alreadyContact := make(map[int64]bool, len(existing))
+		for _, c := range existing {
+			alreadyContact[c.UserID] = true
+		}
+		rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(users))
+		for _, u := range users {
+			if alreadyContact[u.ID] {
+				continue
+			}
+			// Пометка "какой ученик уже привязан" — весь смысл этого
+			// экрана: отличить родителя, который уже водит к нам другого
+			// ребёнка (и его для второго ребёнка нужно найти по имени
+			// среди зарегистрированных, а не создавать заново), от
+			// действительно нового контакта.
+			note := "пока без учеников"
+			if kids, err := h.store.GetStudentsByContact(ctx, u.ID); err == nil && len(kids) > 0 {
+				names := make([]string, len(kids))
+				for i, k := range kids {
+					names[i] = k.DisplayName
+				}
+				note = "уже: " + strings.Join(names, ", ")
+			}
+			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData(
+					fmt.Sprintf("%s (%s)", u.FullName, note),
+					fmt.Sprintf("%s:%d:%d", cbLinkContact, u.ID, sid),
+				),
+			))
+		}
+		if len(rows) == 0 {
+			h.editText(cb.Message.Chat.ID, cb.Message.MessageID, "Нет родителей, которых можно добавить.", nil)
+			h.answerCallback(cb.ID, "")
+			return
+		}
+		kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
+		h.editText(cb.Message.Chat.ID, cb.Message.MessageID, "Выберите родителя:", &kb)
 		h.answerCallback(cb.ID, "")
 
 	case cbUnlinkContact:

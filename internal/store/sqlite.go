@@ -330,6 +330,27 @@ func (s *SQLiteStore) GetUnlinkedStudents(ctx context.Context) ([]Student, error
 	return out, rows.Err()
 }
 
+func (s *SQLiteStore) GetAllUsers(ctx context.Context) ([]User, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, full_name, created_at
+		FROM users
+		ORDER BY full_name
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []User
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.ID, &u.FullName, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
 func (s *SQLiteStore) GetStudentForEvent(ctx context.Context, masterEventID string) (Student, error) {
 	var st Student
 	var notes, intervals sql.NullString

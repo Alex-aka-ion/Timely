@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -244,6 +245,114 @@ func TestStudentDetails_WithContacts(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, text, "Петя")
 	assert.Contains(t, text, "Мама")
+}
+
+// --- "Добавить родителя" (карточка ученика) ----------------------------------
+
+// TestCallback_StudentContact_OffersAddParentEvenWhenEmpty — раньше пустой
+// список контактов был тупиком ("Контактов нет." без единой кнопки):
+// привязать уже зарегистрированного родителя (например, того, кто уже
+// водит к нам другого ребёнка) было нечем, кроме как ждать его повторного
+// /start. Кнопка "➕ Добавить родителя" должна быть даже когда контактов
+// ещё нет ни одного.
+func TestCallback_StudentContact_OffersAddParentEvenWhenEmpty(t *testing.T) {
+	h := makeHandler(t)
+	ctx := context.Background()
+	s, err := h.store.CreateStudent(ctx, "Петя")
+	require.NoError(t, err)
+
+	cb := &tgbotapi.CallbackQuery{
+		ID:      "cb1",
+		From:    &tgbotapi.User{ID: 999},
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: 999}, MessageID: 1},
+		Data:    cbStudentContact + ":" + itoa(s.ID),
+	}
+	h.handleCallback(ctx, cb)
+
+	last := lastEdit(t, h.api.(*fakeTelegramAPI))
+	assert.Contains(t, last.Text, "Контактов нет")
+	require.NotNil(t, last.ReplyMarkup)
+	require.Len(t, last.ReplyMarkup.InlineKeyboard, 1)
+	addBtn := last.ReplyMarkup.InlineKeyboard[0][0]
+	assert.Equal(t, "➕ Добавить родителя", addBtn.Text)
+	require.NotNil(t, addBtn.CallbackData)
+	assert.Equal(t, cbAddContact+":"+itoa(s.ID), *addBtn.CallbackData)
+}
+
+// TestCallback_AddContact_NotesExistingStudentAndExcludesCurrentContacts —
+// главный сценарий фичи: один родитель водит двоих детей на разное время.
+// Список для второго (непривязанного) ученика должен показать этого
+// родителя с пометкой, какой ребёнок у него уже есть, а не только
+// "непривязанных" пользователей — и не предлагать заново того, кто уже
+// контакт именно этого ученика.
+func TestCallback_AddContact_NotesExistingStudentAndExcludesCurrentContacts(t *testing.T) {
+	h := makeHandler(t)
+	ctx := context.Background()
+
+	existingChild, err := h.store.CreateStudent(ctx, "Петя")
+	require.NoError(t, err)
+	parent, err := h.store.CreateUser(ctx, "Мама")
+	require.NoError(t, err)
+	require.NoError(t, h.store.LinkContact(ctx, existingChild.ID, parent.ID, "Мама"))
+
+	alreadyLinked, err := h.store.CreateUser(ctx, "Уже контакт")
+	require.NoError(t, err)
+
+	newChild, err := h.store.CreateStudent(ctx, "Маша")
+	require.NoError(t, err)
+	require.NoError(t, h.store.LinkContact(ctx, newChild.ID, alreadyLinked.ID, "Папа"))
+
+	cb := &tgbotapi.CallbackQuery{
+		ID:      "cb1",
+		From:    &tgbotapi.User{ID: 999},
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: 999}, MessageID: 1},
+		Data:    cbAddContact + ":" + itoa(newChild.ID),
+	}
+	h.handleCallback(ctx, cb)
+
+	last := lastEdit(t, h.api.(*fakeTelegramAPI))
+	require.NotNil(t, last.ReplyMarkup)
+	var texts []string
+	for _, row := range last.ReplyMarkup.InlineKeyboard {
+		for _, btn := range row {
+			texts = append(texts, btn.Text)
+		}
+	}
+	assert.Contains(t, texts, "Мама (уже: Петя)")
+	for _, text := range texts {
+		assert.NotContains(t, text, "Уже контакт", "уже привязанный к ЭТОМУ ученику контакт не должен предлагаться повторно")
+	}
+}
+
+// TestCallback_AddContact_LinksSecondStudentToSameParent — доводит сценарий
+// до конца: выбор родителя из списка действительно привязывает его ко
+// второму ученику, не трогая существующую привязку к первому.
+func TestCallback_AddContact_LinksSecondStudentToSameParent(t *testing.T) {
+	h := makeHandler(t)
+	ctx := context.Background()
+
+	firstChild, err := h.store.CreateStudent(ctx, "Петя")
+	require.NoError(t, err)
+	parent, err := h.store.CreateUser(ctx, "Мама")
+	require.NoError(t, err)
+	require.NoError(t, h.store.LinkContact(ctx, firstChild.ID, parent.ID, "Мама"))
+
+	secondChild, err := h.store.CreateStudent(ctx, "Маша")
+	require.NoError(t, err)
+
+	cb := &tgbotapi.CallbackQuery{
+		ID:      "cb1",
+		From:    &tgbotapi.User{ID: 999},
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: 999}, MessageID: 1},
+		Data:    fmt.Sprintf("%s:%d:%d", cbLinkContact, parent.ID, secondChild.ID),
+	}
+	h.handleCallback(ctx, cb)
+
+	kids, err := h.store.GetStudentsByContact(ctx, parent.ID)
+	require.NoError(t, err)
+	require.Len(t, kids, 2)
+	names := []string{kids[0].DisplayName, kids[1].DisplayName}
+	assert.ElementsMatch(t, []string{"Петя", "Маша"}, names)
 }
 
 // --- "Отвязать событие" (карточка ученика) ----------------------------------

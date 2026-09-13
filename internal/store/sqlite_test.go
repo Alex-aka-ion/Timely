@@ -266,6 +266,24 @@ func TestUnlinkedUsers(t *testing.T) {
 	assert.Equal(t, u1.ID, users[0].ID)
 }
 
+// TestGetAllUsers — в отличие от GetUnlinkedUsers, должен вернуть всех
+// зарегистрированных пользователей, включая уже привязанных к ученику.
+func TestGetAllUsers(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	u1, _ := s.CreateUser(ctx, "Без ученика")
+	u2, _ := s.CreateUser(ctx, "С учеником")
+	st, _ := s.CreateStudent(ctx, "Петя")
+	require.NoError(t, s.LinkContact(ctx, st.ID, u2.ID, "Папа"))
+
+	users, err := s.GetAllUsers(ctx)
+	require.NoError(t, err)
+	require.Len(t, users, 2)
+	ids := []int64{users[0].ID, users[1].ID}
+	assert.ElementsMatch(t, []int64{u1.ID, u2.ID}, ids)
+}
+
 func TestGetUnlinkedStudents(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

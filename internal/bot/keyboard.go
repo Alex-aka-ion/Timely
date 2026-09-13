@@ -18,6 +18,7 @@ const (
 	cbUnlinkEventC       = "unlink_event_c"  // подтверждение; данные: master_event_id
 	cbStudentMenu        = "student"         // показать меню ученика; данные: student_id
 	cbStudentContact     = "student_cont"    // меню "контакты"; данные: student_id
+	cbAddContact         = "add_contact"     // список родителей для привязки к ученику; данные: student_id
 	cbStudentEvents      = "student_events"  // меню "события"; данные: student_id
 	cbPickEvent          = "pick_event"      // выбран event для привязки; данные: master_event_id
 	cbPickStudent        = "pick_student"    // выбран ученик для события; данные: master_event_id:student_id
