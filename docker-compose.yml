@@ -1,0 +1,27 @@
+services:
+  booking-bot:
+    build: .
+    container_name: booking-bot
+    restart: unless-stopped
+    # Все настройки (BOT_TOKEN, TEACHER_TELEGRAM_ID, TZ и т.д.) — в .env
+    # рядом с этим файлом, см. .env.example. .env в образ не копируется
+    # (см. .dockerignore) — только подставляется как переменные окружения
+    # процесса при старте контейнера, секреты в слоях образа не оседают.
+    env_file:
+      - .env
+    volumes:
+      # SQLite-база — единственное, что должно пережить пересоздание
+      # контейнера. ./data на хосте нужно создать и chown'ить на UID/GID
+      # 10001 ДО первого запуска (см. README) — иначе bind mount достанется
+      # от хостового root, и процесс внутри контейнера (не root) не
+      # сможет в него писать.
+      - ./data:/app/data
+      # credentials.json/token.json получены один раз через
+      # `./booking-bot --auth` (см. README) — на сервере эту команду не
+      # запускают: OAuth loopback-flow открывает браузер, на headless VDS
+      # его нет. Оба файла read-only — от компрометации внутри контейнера
+      # это не спасёт учётку целиком, но случайную перезапись — да.
+      - ./credentials.json:/app/credentials.json:ro
+      - ./token.json:/app/token.json:ro
+    # Ни один порт не публикуется — бот не принимает входящих запросов
+    # (см. Dockerfile).

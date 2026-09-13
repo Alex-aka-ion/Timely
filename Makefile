@@ -18,6 +18,9 @@ help:
 	@echo "  mocks       — сгенерировать моки через mockery"
 	@echo "  tidy        — go mod tidy"
 	@echo "  clean       — удалить артефакты сборки"
+	@echo "  docker-up   — собрать и запустить в Docker (docker compose up -d --build)"
+	@echo "  docker-logs — логи контейнера"
+	@echo "  docker-down — остановить контейнер"
 
 .PHONY: build
 build:
@@ -58,3 +61,15 @@ tidy:
 .PHONY: clean
 clean:
 	rm -f $(BINARY) coverage.out coverage.html
+
+.PHONY: docker-up
+docker-up:
+	docker compose up -d --build
+
+.PHONY: docker-logs
+docker-logs:
+	docker compose logs -f
+
+.PHONY: docker-down
+docker-down:
+	docker compose down

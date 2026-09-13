@@ -101,7 +101,64 @@ make build-linux # собрать для Linux/amd64 (для деплоя)
 
 ## Деплой на VPS
 
-Любой Linux VPS (Ubuntu 22.04+), минимум 512 MB RAM. Go на сервере не нужен.
+Любой Linux VPS (Ubuntu 22.04+ или любой другой с Docker), минимум 512 MB RAM.
+
+Два независимых варианта — выбирайте тот, что вписывается в то, как уже
+устроен сервер. Оба ожидают, что `credentials.json`/`token.json` уже
+получены локально через `./booking-bot --auth` (см. раздел "Google Calendar
+API" выше) — сама OAuth-авторизация открывает браузер, поэтому на headless
+сервере её не проводят, файлы туда только копируют.
+
+### Вариант A: Docker
+
+Подходит, если на сервере уже что-то крутится в Docker — бот встаёт рядом
+отдельным контейнером, ничего в существующих не трогая: портов наружу не
+открывает, общей сети с другими контейнерами не требует.
+
+```bash
+# 1. На сервере: каталог проекта и .env
+mkdir -p /opt/booking-bot && cd /opt/booking-bot
+git clone <URL репозитория> . # либо scp содержимого репозитория как удобно
+cp .env.example .env
+nano .env  # BOT_TOKEN, TEACHER_TELEGRAM_ID, TZ (часовой пояс занятий) и т.д.
+
+# 2. Локально: скопировать на сервер уже полученные OAuth-файлы
+scp credentials.json token.json user@server:/opt/booking-bot/
+
+# 3. На сервере: каталог под БД — заранее и с владельцем, который
+# совпадает с UID/GID процесса внутри контейнера (10001, см. Dockerfile).
+# Без этого шага docker compose сам создаст ./data при первом volume
+# mount, но от имени хостового root — непривилегированный процесс
+# внутри контейнера не сможет туда писать (permission denied при
+# открытии БД).
+mkdir -p data && chown 10001:10001 data
+
+# 4. На сервере: собрать и запустить
+docker compose up -d --build
+
+# 5. На сервере: логи
+docker compose logs -f
+```
+
+`docker-compose.yml` монтирует `./data` под БД (переживает пересоздание
+контейнера) и `credentials.json`/`token.json` — read-only. Обновление после
+`git pull`: `docker compose up -d --build`.
+
+#### Бэкапы (Docker)
+
+БД лежит в `/opt/booking-bot/data/booking.db` на самом хосте (bind mount) —
+`scripts/backup.sh` можно запускать прямо там, без захода в контейнер:
+
+```bash
+DB_PATH=/opt/booking-bot/data/booking.db /opt/booking-bot/scripts/backup.sh
+
+# В crontab root:
+0 3 * * * DB_PATH=/opt/booking-bot/data/booking.db /opt/booking-bot/scripts/backup.sh >> /var/log/booking-backup.log 2>&1
+```
+
+### Вариант B: systemd
+
+Go на сервере не нужен — бинарник собирается локально и просто копируется.
 
 ```bash
 # 1. Локально: собрать бинарник для Linux
@@ -125,7 +182,7 @@ sudo systemctl enable --now booking-bot
 sudo journalctl -u booking-bot -f
 ```
 
-### Бэкапы
+#### Бэкапы (systemd)
 
 ```bash
 sudo cp /tmp/scripts/backup.sh /opt/booking-bot/scripts/
@@ -135,7 +192,9 @@ sudo chmod 750 /opt/booking-bot/scripts/backup.sh
 0 3 * * * /opt/booking-bot/scripts/backup.sh >> /var/log/booking-backup.log 2>&1
 ```
 
-Скрипт использует `sqlite3 .backup` (безопасно при WAL-режиме), хранит бэкапы 30 дней (`RETAIN_DAYS`).
+Оба варианта бэкапа используют один и тот же `sqlite3 .backup` (безопасно
+при WAL-режиме — API SQLite, а не голый `cp`, корректно работает и пока
+бот запущен), хранят бэкапы 30 дней (`RETAIN_DAYS`).
 
 ## Безопасность
 

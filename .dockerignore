@@ -1,0 +1,37 @@
+# Секреты — никогда не должны попасть в контекст сборки/образ.
+.env
+.env.local
+*.env
+credentials.json
+token.json
+
+# База данных — контейнер получает её через volume, не через образ.
+data/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Бинарники, собранные локально (в образе собирается свой).
+booking-bot
+booking-bot-*
+*.exe
+*.test
+*.out
+
+# Метаданные, документация, IDE/OS — не нужны внутри образа.
+.git/
+.github/
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+*.md
+
+# Тестовое покрытие, логи, бэкапы.
+coverage.out
+coverage.html
+*.log
+logs/
+backups/
