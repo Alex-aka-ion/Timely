@@ -87,3 +87,57 @@ func kbConfirm(confirmCB, cancelCB string) tgbotapi.InlineKeyboardMarkup {
 		),
 	)
 }
+
+// --- постоянное меню (ReplyKeyboardMarkup) -----------------------------------
+//
+// В отличие от инлайн-кнопок выше (callback_data, отдельный API-метод
+// answerCallback, кнопки живут под конкретным сообщением), это кнопки
+// "быстрого ввода": нажатие на любую из них с точки зрения Telegram API
+// неотличимо от того, что пользователь напечатал этот текст сам и отправил.
+// Поэтому у них нет callback'ов — это текстовые алиасы команд, которые
+// разбираются в bot.go (см. menuAction).
+
+const (
+	btnStudents    = "👥 Ученики"
+	btnStudentsNew = "➕ Новый ученик"
+	btnUnlinked    = "🔗 Не привязаны"
+	btnEvents      = "📅 События"
+	btnSettings    = "⚙️ Настройки"
+	btnMyStudents  = "👶 Мои ученики"
+)
+
+// menuKeyboardTeacher — постоянное меню преподавателя: по кнопке на каждую
+// существующую команду (/students, /students_new, /unlinked, /events,
+// /settings) — сами команды при этом продолжают работать как раньше.
+func menuKeyboardTeacher() tgbotapi.ReplyKeyboardMarkup {
+	kb := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(btnStudents),
+			tgbotapi.NewKeyboardButton(btnStudentsNew),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(btnUnlinked),
+			tgbotapi.NewKeyboardButton(btnEvents),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(btnSettings),
+		),
+	)
+	// ResizeKeyboard — компактная высота кнопок вместо "во весь экран"
+	// (поведение Telegram-клиента по умолчанию, если флаг не выставить).
+	kb.ResizeKeyboard = true
+	return kb
+}
+
+// menuKeyboardParent — меню родителя: пока только "Мои ученики", но уже
+// отдельной функцией — когда кнопок станет больше, менять нужно будет
+// только здесь.
+func menuKeyboardParent() tgbotapi.ReplyKeyboardMarkup {
+	kb := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(btnMyStudents),
+		),
+	)
+	kb.ResizeKeyboard = true
+	return kb
+}

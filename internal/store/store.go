@@ -108,6 +108,11 @@ type Store interface {
 	// GetStudentContacts возвращает всех родителей ученика.
 	GetStudentContacts(ctx context.Context, studentID int64) ([]Contact, error)
 
+	// GetStudentsByContact возвращает всех учеников, привязанных к данному
+	// родителю (обратная связь к GetStudentContacts) — нужно для кнопки
+	// "Мои ученики" в меню родителя.
+	GetStudentsByContact(ctx context.Context, userID int64) ([]Student, error)
+
 	// SetStudentIntervals устанавливает индивидуальные интервалы напоминаний.
 	// Пустая строка = вернуть на глобальные настройки.
 	SetStudentIntervals(ctx context.Context, studentID int64, intervals string) error

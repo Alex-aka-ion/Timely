@@ -231,3 +231,38 @@ func TestSettings(t *testing.T) {
 	_, err = s.GetSetting(ctx, "missing")
 	assert.ErrorIs(t, err, ErrNotFound)
 }
+
+// TestGetStudentsByContact — обратная связь к GetStudentContacts: находим
+// учеников по родителю, а не наоборот. Нужно для кнопки "Мои ученики" в
+// Telegram-меню родителя.
+func TestGetStudentsByContact(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	mama, _ := s.CreateUser(ctx, "Мама")
+	papa, _ := s.CreateUser(ctx, "Папа")
+	petya, _ := s.CreateStudent(ctx, "Петя")
+	masha, _ := s.CreateStudent(ctx, "Маша")
+
+	// У мамы — оба ребёнка, у папы — только Петя.
+	require.NoError(t, s.LinkContact(ctx, petya.ID, mama.ID, "Мама"))
+	require.NoError(t, s.LinkContact(ctx, masha.ID, mama.ID, "Мама"))
+	require.NoError(t, s.LinkContact(ctx, petya.ID, papa.ID, "Папа"))
+
+	got, err := s.GetStudentsByContact(ctx, mama.ID)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, "Маша", got[0].DisplayName) // ORDER BY display_name
+	assert.Equal(t, "Петя", got[1].DisplayName)
+
+	got, err = s.GetStudentsByContact(ctx, papa.ID)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "Петя", got[0].DisplayName)
+
+	// Пользователь без единого привязанного ученика — пустой список, не ошибка.
+	stranger, _ := s.CreateUser(ctx, "Посторонний")
+	got, err = s.GetStudentsByContact(ctx, stranger.ID)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}

@@ -184,12 +184,10 @@ func (h *Handler) handleTeacherMessage(ctx context.Context, msg *tgbotapi.Messag
 	log := logger.FromContext(ctx)
 	from := msg.From
 
-	if msg.Text == "/cancel" {
-		h.dialog.ClearState(from.ID)
-		h.send(from.ID, "Действие отменено.")
-		return
-	}
-
+	// /cancel обрабатывается в bot.go:handleUpdate (case "cancel"), а не
+	// здесь: это команда (IsCommand()==true), и handleUpdate возвращается
+	// сразу после своего switch по командам, так и не дойдя досюда — раньше
+	// тут была проверка на тот же текст, но она была мёртвым кодом.
 	state := h.dialog.Get(from.ID)
 	switch state.State {
 	case StateAwaitingStudentName:

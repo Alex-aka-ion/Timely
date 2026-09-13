@@ -322,6 +322,29 @@ func (s *SQLiteStore) GetStudentContacts(ctx context.Context, studentID int64) (
 	return out, rows.Err()
 }
 
+func (s *SQLiteStore) GetStudentsByContact(ctx context.Context, userID int64) ([]Student, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT s.id, s.display_name, COALESCE(s.notes,''), COALESCE(s.reminder_intervals,''), s.created_at
+		FROM students s
+		JOIN student_contacts sc ON sc.student_id = s.id
+		WHERE sc.user_id = ?
+		ORDER BY s.display_name
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Student
+	for rows.Next() {
+		var st Student
+		if err := rows.Scan(&st.ID, &st.DisplayName, &st.Notes, &st.ReminderIntervals, &st.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, st)
+	}
+	return out, rows.Err()
+}
+
 func (s *SQLiteStore) SetStudentIntervals(ctx context.Context, studentID int64, intervals string) error {
 	intervals = strings.TrimSpace(intervals)
 	var arg any

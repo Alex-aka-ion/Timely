@@ -122,9 +122,28 @@ func (h *Handler) handleUpdate(ctx context.Context, upd tgbotapi.Update) {
 			h.handleEvents(ctx, msg)
 		case "settings":
 			h.handleSettings(ctx, msg)
+		case "cancel":
+			// ВАЖНО: это единственное реальное место для /cancel. Любое
+			// сообщение вида "/слово" — это msg.IsCommand()==true, поэтому
+			// если тут не завести case, оно уйдёт в default и потеряется,
+			// так и не дойдя до handleTeacherMessage (там раньше была
+			// проверка на тот же текст, которая из-за этого никогда не
+			// срабатывала, — убрана).
+			h.dialog.ClearState(from.ID)
+			h.send(from.ID, "Действие отменено.")
 		default:
 			// Неизвестная команда — игнорируем.
 		}
+		return
+	}
+
+	// Кнопки постоянного меню (ReplyKeyboardMarkup, см. keyboard.go) — это не
+	// команды Telegram, а обычные текстовые сообщения с текстом кнопки.
+	// Проверяем их здесь, ДО маршрутизации по состоянию диалога: иначе,
+	// например, нажатие "📅 События" во время ввода имени ученика
+	// было бы воспринято как это самое имя.
+	if action, ok := h.menuAction(from.ID, msg.Text); ok {
+		action(ctx, msg)
 		return
 	}
 
@@ -150,11 +169,70 @@ func (h *Handler) requireTeacher(userID int64) bool {
 
 // send отправляет простое текстовое сообщение пользователю.
 // Ошибки логируются и проглатываются (нет смысла их прокидывать наверх).
+//
+// К каждому такому сообщению прикрепляем постоянное меню (ReplyKeyboardMarkup):
+// Telegram показывает такую клавиатуру внизу экрана и держит её там, пока не
+// придёт другая, — то есть достаточно один раз прислать её с любым сообщением,
+// и она останется у пользователя даже под сообщениями, где reply_markup не
+// задан (например, инлайн-кнопки в /events — независимый слой поверх
+// конкретного сообщения, а не замена нижнего меню).
 func (h *Handler) send(chatID int64, text string) {
 	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ReplyMarkup = h.menuKeyboard(chatID)
 	if _, err := h.api.Send(msg); err != nil {
 		// Логируем без слога-контекста (тут его нет) — простой stderr.
 		fmt.Println("telegram send error:", err)
+	}
+}
+
+// menuKeyboard возвращает постоянную клавиатуру для роли пользователя этого
+// чата. Для приватных чатов chat_id == user_id (см. externalID ниже), так что
+// isTeacher можно применить прямо к chatID.
+func (h *Handler) menuKeyboard(chatID int64) tgbotapi.ReplyKeyboardMarkup {
+	if h.isTeacher(chatID) {
+		return menuKeyboardTeacher()
+	}
+	return menuKeyboardParent()
+}
+
+// menuAction сопоставляет текст сообщения кнопке постоянного меню (если это
+// она) и возвращает обработчик для неё. Кнопки меню — алиасы существующих
+// команд: например, "👥 Ученики" делает то же самое, что и /students,
+// просто её не нужно печатать.
+//
+// Возвращаем func(...), а не сразу вызываем нужный handleXxx — так вызывающий
+// код (handleUpdate) сам решает, когда его позвать, единообразно с остальными
+// ветками диспетчеризации. В PHP ближайший аналог — вернуть callable/Closure
+// вместо результата его вызова.
+func (h *Handler) menuAction(userID int64, text string) (func(context.Context, *tgbotapi.Message), bool) {
+	if h.isTeacher(userID) {
+		switch text {
+		case btnStudents:
+			return h.runMenuAction(userID, h.handleStudents), true
+		case btnStudentsNew:
+			return h.runMenuAction(userID, h.handleStudentsNew), true
+		case btnUnlinked:
+			return h.runMenuAction(userID, h.handleUnlinked), true
+		case btnEvents:
+			return h.runMenuAction(userID, h.handleEvents), true
+		case btnSettings:
+			return h.runMenuAction(userID, h.handleSettings), true
+		}
+		return nil, false
+	}
+	if text == btnMyStudents {
+		return h.runMenuAction(userID, h.handleMyStudents), true
+	}
+	return nil, false
+}
+
+// runMenuAction оборачивает обработчик кнопки меню: переход в другой раздел
+// меню всегда отменяет незавершённый диалог (ввод имени ученика, интервалов
+// и т.п.) — так же, как это делает команда /cancel.
+func (h *Handler) runMenuAction(userID int64, fn func(context.Context, *tgbotapi.Message)) func(context.Context, *tgbotapi.Message) {
+	return func(ctx context.Context, msg *tgbotapi.Message) {
+		h.dialog.ClearState(userID)
+		fn(ctx, msg)
 	}
 }
 

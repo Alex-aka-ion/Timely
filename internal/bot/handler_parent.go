@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -98,4 +99,45 @@ func (h *Handler) handleParentMessage(ctx context.Context, msg *tgbotapi.Message
 		// В любом другом состоянии для родителя — просто игнорируем,
 		// чтобы бот не превращался в чат.
 	}
+}
+
+// --- "Мои ученики" (кнопка меню родителя) ------------------------------------
+
+// handleMyStudents показывает родителю список привязанных к нему учеников.
+func (h *Handler) handleMyStudents(ctx context.Context, msg *tgbotapi.Message) {
+	log := logger.FromContext(ctx)
+	from := msg.From
+
+	if !h.rl.Allow(from.ID) {
+		return
+	}
+
+	user, err := h.store.GetUserByAccount(ctx, MessengerName, externalID(from.ID))
+	if errors.Is(err, store.ErrNotFound) {
+		h.send(from.ID, "Вы ещё не зарегистрированы. Отправьте /start.")
+		return
+	}
+	if err != nil {
+		log.Error("GetUserByAccount", "error", err)
+		h.send(from.ID, "Произошла ошибка. Попробуйте позже.")
+		return
+	}
+
+	students, err := h.store.GetStudentsByContact(ctx, user.ID)
+	if err != nil {
+		log.Error("GetStudentsByContact", "error", err)
+		h.send(from.ID, "Произошла ошибка. Попробуйте позже.")
+		return
+	}
+	if len(students) == 0 {
+		h.send(from.ID, "Пока не привязано ни одного ученика — преподаватель добавит вас позже.")
+		return
+	}
+
+	var sb strings.Builder
+	sb.WriteString("Ваши ученики:\n")
+	for _, s := range students {
+		fmt.Fprintf(&sb, "\u2022 %s\n", s.DisplayName)
+	}
+	h.send(from.ID, sb.String())
 }
