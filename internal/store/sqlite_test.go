@@ -256,6 +256,25 @@ func TestStudentIntervals(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrNotFound))
 }
 
+func TestUpdateStudentName(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	st, err := s.CreateStudent(ctx, "Петя")
+	require.NoError(t, err)
+
+	require.NoError(t, s.UpdateStudentName(ctx, st.ID, "  Пётр  "))
+	got, err := s.getStudent(ctx, st.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Пётр", got.DisplayName, "пробелы должны обрезаться, как и в CreateStudent")
+
+	// Несуществующий ученик — ErrNotFound.
+	err = s.UpdateStudentName(ctx, 9999, "Кто-то")
+	assert.True(t, errors.Is(err, ErrNotFound))
+
+	// Пустое имя отклоняется, как и в CreateStudent.
+	assert.Error(t, s.UpdateStudentName(ctx, st.ID, "   "))
+}
+
 func TestSettings(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

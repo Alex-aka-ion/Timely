@@ -121,6 +121,10 @@ type Store interface {
 	// Пустая строка = вернуть на глобальные настройки.
 	SetStudentIntervals(ctx context.Context, studentID int64, intervals string) error
 
+	// UpdateStudentName переименовывает ученика (display_name). ErrNotFound
+	// если ученика с таким ID не существует.
+	UpdateStudentName(ctx context.Context, studentID int64, name string) error
+
 	// contacts (симметрично) ----------------------------------------------
 
 	LinkContact(ctx context.Context, studentID, userID int64, label string) error

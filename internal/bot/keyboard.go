@@ -21,6 +21,7 @@ const (
 	cbPickEvent      = "pick_event"     // выбран event для привязки; данные: master_event_id
 	cbPickStudent    = "pick_student"   // выбран ученик для события; данные: master_event_id:student_id
 	cbSetIntervals   = "set_intervals"  // изменить интервалы ученика; данные: student_id
+	cbRenameStudent  = "rename_student" // переименовать ученика; данные: student_id
 	cbStopRemove     = "stop_remove"    // удалить родителя из всех контактов после /stop; данные: user_id
 	cbCancel         = "cancel"         // отменить текущее действие
 )
@@ -74,6 +75,12 @@ func kbStudentMenu(studentID int64) tgbotapi.InlineKeyboardMarkup {
 			tgbotapi.NewInlineKeyboardButtonData(
 				"Изменить интервалы",
 				fmt.Sprintf("%s:%d", cbSetIntervals, studentID),
+			),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(
+				"Переименовать",
+				fmt.Sprintf("%s:%d", cbRenameStudent, studentID),
 			),
 		),
 	)

@@ -63,6 +63,74 @@ func TestRequireTeacher_BlocksNonTeacher(t *testing.T) {
 	assert.Equal(t, StateIdle, h.dialog.Get(1).State)
 }
 
+// --- переименование ученика ------------------------------------------------
+
+// TestCallback_RenameStudent_SetsState — нажатие "Переименовать" в меню
+// ученика переводит преподавателя в StateAwaitingStudentRename с ID ученика
+// в Data (тот же ключ "student_id", что и у StateAwaitingIntervals).
+func TestCallback_RenameStudent_SetsState(t *testing.T) {
+	h := makeHandler(t)
+	ctx := context.Background()
+	st, err := h.store.CreateStudent(ctx, "Петя")
+	require.NoError(t, err)
+
+	cb := &tgbotapi.CallbackQuery{
+		ID:      "cb1",
+		From:    &tgbotapi.User{ID: 999},
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: 999}, MessageID: 1},
+		Data:    cbRenameStudent + ":" + itoa(st.ID),
+	}
+	h.handleCallback(ctx, cb)
+
+	entry := h.dialog.Get(999)
+	assert.Equal(t, StateAwaitingStudentRename, entry.State)
+	assert.Equal(t, st.ID, entry.Data["student_id"])
+}
+
+// TestHandleTeacherMessage_RenameStudentUpdatesName — полный сценарий: после
+// входа в StateAwaitingStudentRename следующее сообщение обновляет
+// display_name ученика и сбрасывает диалог.
+func TestHandleTeacherMessage_RenameStudentUpdatesName(t *testing.T) {
+	h := makeHandler(t)
+	ctx := context.Background()
+	st, err := h.store.CreateStudent(ctx, "Петя")
+	require.NoError(t, err)
+
+	h.dialog.Set(999, StateAwaitingStudentRename, map[string]any{"student_id": st.ID})
+	h.handleTeacherMessage(ctx, &tgbotapi.Message{From: &tgbotapi.User{ID: 999}, Text: "Пётр"})
+
+	assert.Equal(t, StateIdle, h.dialog.Get(999).State)
+
+	students, err := h.store.GetStudents(ctx)
+	require.NoError(t, err)
+	require.Len(t, students, 1)
+	assert.Equal(t, "Пётр", students[0].DisplayName)
+
+	api := h.api.(*fakeTelegramAPI)
+	require.NotEmpty(t, api.sent)
+	last := api.sent[len(api.sent)-1].(tgbotapi.MessageConfig)
+	assert.Contains(t, last.Text, "обновлено")
+}
+
+// TestHandleTeacherMessage_RenameStudentRejectsEmptyName — пустой ввод не
+// должен сбрасывать StateAwaitingStudentRename: преподаватель остаётся в
+// диалоге и может попробовать снова.
+func TestHandleTeacherMessage_RenameStudentRejectsEmptyName(t *testing.T) {
+	h := makeHandler(t)
+	ctx := context.Background()
+	st, err := h.store.CreateStudent(ctx, "Петя")
+	require.NoError(t, err)
+
+	h.dialog.Set(999, StateAwaitingStudentRename, map[string]any{"student_id": st.ID})
+	h.handleTeacherMessage(ctx, &tgbotapi.Message{From: &tgbotapi.User{ID: 999}, Text: "   "})
+
+	assert.Equal(t, StateAwaitingStudentRename, h.dialog.Get(999).State)
+	students, err := h.store.GetStudents(ctx)
+	require.NoError(t, err)
+	require.Len(t, students, 1)
+	assert.Equal(t, "Петя", students[0].DisplayName, "имя не должно было измениться")
+}
+
 func TestStudentDetails_NotFound(t *testing.T) {
 	h := makeHandler(t)
 	text, _, err := h.studentDetails(context.Background(), 9999)

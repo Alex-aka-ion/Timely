@@ -372,6 +372,30 @@ func (s *SQLiteStore) GetStudentsByContact(ctx context.Context, userID int64) ([
 	return out, rows.Err()
 }
 
+// UpdateStudentName переименовывает ученика — та же валидация (trim/пустая
+// строка/лимит 100 символов), что и в CreateStudent при создании.
+func (s *SQLiteStore) UpdateStudentName(ctx context.Context, studentID int64, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("display_name пуст")
+	}
+	if len(name) > 100 {
+		name = name[:100]
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE students SET display_name = ? WHERE id = ?`, name, studentID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *SQLiteStore) SetStudentIntervals(ctx context.Context, studentID int64, intervals string) error {
 	intervals = strings.TrimSpace(intervals)
 	var arg any

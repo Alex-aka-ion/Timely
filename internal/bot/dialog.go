@@ -32,6 +32,11 @@ const (
 	// регистрация — создаёт нового User) здесь пользователь уже существует,
 	// меняем только имя (store.UpdateUserName).
 	StateAwaitingNewName
+
+	// Преподаватель в процессе переименования ученика (кнопка "Переименовать"
+	// в меню ученика). Data содержит ID ученика — тот же ключ "student_id",
+	// что и у StateAwaitingIntervals.
+	StateAwaitingStudentRename
 )
 
 // Entry — состояние одного пользователя.

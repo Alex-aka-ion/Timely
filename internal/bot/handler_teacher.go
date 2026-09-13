@@ -218,6 +218,21 @@ func (h *Handler) handleTeacherMessage(ctx context.Context, msg *tgbotapi.Messag
 		}
 		h.dialog.ClearState(from.ID)
 
+	case StateAwaitingStudentRename:
+		name := strings.TrimSpace(msg.Text)
+		if name == "" {
+			h.send(from.ID, "Имя не может быть пустым. Введите ещё раз или /cancel.")
+			return
+		}
+		studentID, _ := state.Data["student_id"].(int64)
+		if err := h.store.UpdateStudentName(ctx, studentID, name); err != nil {
+			log.Error("UpdateStudentName", "student_id", studentID, "error", err)
+			h.send(from.ID, "Не удалось сохранить.")
+			return
+		}
+		h.dialog.ClearState(from.ID)
+		h.send(from.ID, "Имя ученика обновлено.")
+
 	case StateAwaitingIntervals:
 		text := strings.TrimSpace(msg.Text)
 		if text != "" {
@@ -551,6 +566,17 @@ func (h *Handler) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery
 		h.editText(cb.Message.Chat.ID, cb.Message.MessageID,
 			"Введите интервалы через запятую (24h,2h) или пустую строку для возврата к глобальным. /cancel для отмены.",
 			nil)
+		h.answerCallback(cb.ID, "")
+
+	case cbRenameStudent:
+		sid, err := strconv.ParseInt(rest, 10, 64)
+		if err != nil {
+			h.answerCallback(cb.ID, "")
+			return
+		}
+		h.dialog.Set(from.ID, StateAwaitingStudentRename, map[string]any{"student_id": sid})
+		h.editText(cb.Message.Chat.ID, cb.Message.MessageID,
+			"Введите новое имя ученика, или /cancel для отмены.", nil)
 		h.answerCallback(cb.ID, "")
 
 	default:
