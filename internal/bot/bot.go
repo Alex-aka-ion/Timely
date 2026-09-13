@@ -32,6 +32,7 @@ type Handler struct {
 	adminUI     admin.UI
 	calClient   calendar.Client
 	eventTokens *eventTokens
+	logRing     *logger.Ring
 }
 
 // HandlerDeps — все зависимости Handler.
@@ -43,6 +44,11 @@ type HandlerDeps struct {
 	Dispatch    *notify.Dispatcher
 	AdminUI     admin.UI
 	CalClient   calendar.Client
+	// LogRing — кольцевой буфер последних строк лога для команды /log
+	// (см. handler_teacher.go). Необязателен: nil, если вызывающий код
+	// (например, тесты) его не завёл — /log в этом случае просто ответит,
+	// что лог недоступен.
+	LogRing *logger.Ring
 }
 
 // NewHandler создаёт Handler с лимитом 30 действий/мин на пользователя.
@@ -65,6 +71,7 @@ func NewHandler(d HandlerDeps) *Handler {
 		adminUI:     d.AdminUI,
 		calClient:   d.CalClient,
 		eventTokens: newEventTokens(),
+		logRing:     d.LogRing,
 	}
 }
 
@@ -135,6 +142,10 @@ func (h *Handler) handleUpdate(ctx context.Context, upd tgbotapi.Update) {
 			h.handleStop(ctx, msg)
 		case "rename":
 			h.handleRenameStart(ctx, msg)
+		case "log":
+			// Служебная команда для разработчика/преподавателя — намеренно
+			// без кнопки в постоянном меню (см. menuKeyboardTeacher).
+			h.handleLog(ctx, msg)
 		case "cancel":
 			// ВАЖНО: это единственное реальное место для /cancel. Любое
 			// сообщение вида "/слово" — это msg.IsCommand()==true, поэтому

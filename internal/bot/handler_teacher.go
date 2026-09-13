@@ -266,6 +266,54 @@ func (h *Handler) handleSettings(ctx context.Context, msg *tgbotapi.Message) {
 		val))
 }
 
+// --- /log ---------------------------------------------------------------
+
+// logTailLimit — с запасом от 4096-символьного лимита Telegram на текст
+// сообщения: оставляет место под собственный текст и минимизирует шанс
+// обрезать сообщение прямо на границе.
+const logTailLimit = 3800
+
+// handleLog отправляет последние строки лога процесса прямо в чат — чтобы
+// посмотреть, что бот только что делал, не заходя на сервер за
+// `docker compose logs`/`journalctl`. Источник — logger.Ring: буфер в
+// памяти, а не файл или БД, поэтому сбрасывается при перезапуске/
+// передеплое (см. logger/ring.go) — это оперативная сводка, а не архив.
+func (h *Handler) handleLog(ctx context.Context, msg *tgbotapi.Message) {
+	if !h.requireTeacher(msg.From.ID) {
+		return
+	}
+	if h.logRing == nil {
+		h.send(msg.From.ID, "Лог недоступен.")
+		return
+	}
+	lines := h.logRing.Lines()
+	if len(lines) == 0 {
+		h.send(msg.From.ID, "Лог пуст.")
+		return
+	}
+
+	// Берём с конца (самые свежие записи), пока укладываемся в лимит —
+	// целыми строками, чтобы не резать посреди символа/слова.
+	var kept []string
+	total := 0
+	for i := len(lines) - 1; i >= 0; i-- {
+		total += len(lines[i]) + 1
+		if total > logTailLimit && len(kept) > 0 {
+			break
+		}
+		kept = append(kept, lines[i])
+	}
+	for i, j := 0, len(kept)-1; i < j; i, j = i+1, j-1 {
+		kept[i], kept[j] = kept[j], kept[i]
+	}
+
+	text := strings.Join(kept, "\n")
+	if len(kept) < len(lines) {
+		text = fmt.Sprintf("…показаны последние %d из %d записей\n%s", len(kept), len(lines), text)
+	}
+	h.send(msg.From.ID, text)
+}
+
 // --- сообщения преподавателя в режиме диалога ------------------------------
 
 func (h *Handler) handleTeacherMessage(ctx context.Context, msg *tgbotapi.Message) {

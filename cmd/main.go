@@ -41,7 +41,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	// logRing — последние строки лога в памяти для команды /log в боте
+	// (см. internal/logger/ring.go); оборачивает handler уже после New,
+	// чтобы не менять её сигнатуру ради теста единственного вызывающего.
+	logRing := logger.NewRing(50)
 	log := logger.New(cfg.LogLevel, cfg.LogFormat)
+	log = slog.New(logger.WrapWithRing(log.Handler(), logRing))
 	slog.SetDefault(log)
 
 	// --auth: только OAuth flow, без запуска бота.
@@ -119,6 +124,7 @@ func main() {
 		Dispatch:    dispatcher,
 		AdminUI:     adminUI,
 		CalClient:   calClient,
+		LogRing:     logRing,
 	})
 
 	// Scheduler.
