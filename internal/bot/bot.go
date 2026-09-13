@@ -45,7 +45,14 @@ type HandlerDeps struct {
 	CalClient   calendar.Client
 }
 
-// NewHandler создаёт Handler с типичными значениями rate-limiter (5/мин).
+// NewHandler создаёт Handler с лимитом 30 действий/мин на пользователя.
+//
+// Раньше было 5/мин — оказалось слишком строго для реальной работы:
+// лимитер считает КАЖДОЕ действие, включая клик по инлайн-кнопке (см.
+// handleCallback), а обычная навигация преподавателя (список учеников →
+// ученик → контакты → подтвердить отвязку) — это уже 4 клика подряд.
+// 30/мин всё ещё защищает от случайного спама/зацикленного клиента, но
+// не мешает нормальной работе.
 func NewHandler(d HandlerDeps) *Handler {
 	return &Handler{
 		api:         d.API,
@@ -53,7 +60,7 @@ func NewHandler(d HandlerDeps) *Handler {
 		cfg:         d.Cfg,
 		store:       d.Store,
 		dialog:      NewDialog(),
-		rl:          NewRateLimiter(5, time.Minute),
+		rl:          NewRateLimiter(30, time.Minute),
 		dispatch:    d.Dispatch,
 		adminUI:     d.AdminUI,
 		calClient:   d.CalClient,
