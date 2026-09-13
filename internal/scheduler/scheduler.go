@@ -228,9 +228,12 @@ func buildText(student, summary string, interval time.Duration, start time.Time)
 
 // formatWhen — единообразное форматирование времени во всех текстах,
 // которые планировщик шлёт родителям (напоминания и уведомления об
-// изменениях).
+// изменениях). "MST" — не литерал, а формат-верб time.Format: Go подставит
+// туда аббревиатуру (или числовое смещение вроде "+04", если для часового
+// пояса в tzdata нет буквенного обозначения) того часового пояса, что
+// сейчас в TZ/системе — без привязки к конкретному региону в коде.
 func formatWhen(t time.Time) string {
-	return t.Local().Format("Mon 02.01 в 15:04")
+	return t.Local().Format("Mon 02.01 в 15:04 MST")
 }
 
 // detectChange сравнивает текущее состояние instance с последним известным
@@ -274,8 +277,8 @@ func (s *Scheduler) detectChange(ctx context.Context, in calendar.Instance, stud
 
 	case !in.Start.Equal(prev.Start):
 		s.notifyContacts(ctx, student, fmt.Sprintf(
-			"Время занятия у %s изменено.\n%s\nБыло: %s\nСтало: %s",
-			student.DisplayName, in.Summary, formatWhen(prev.Start), formatWhen(in.Start)))
+			"Время занятия у %s изменено.\nСтало: %s",
+			student.DisplayName, formatWhen(in.Start)))
 		if err := s.store.SaveEventState(ctx, in.ID, in.Start); err != nil {
 			log.Error("SaveEventState (перенос)", "instance_id", in.ID, "error", err)
 		}
