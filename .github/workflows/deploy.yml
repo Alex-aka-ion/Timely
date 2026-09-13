@@ -34,6 +34,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Обязателен для cache-from/cache-to: type=gha ниже — builder по
+      # умолчанию на раннере использует driver "docker", который не умеет
+      # экспортировать кэш ("Cache export is not supported for the docker
+      # driver"). setup-buildx-action поднимает builder с driver
+      # "docker-container", который это умеет.
+      - uses: docker/setup-buildx-action@v3
+
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
