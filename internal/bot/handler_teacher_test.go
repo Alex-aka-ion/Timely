@@ -325,6 +325,109 @@ func TestCallback_StudentEvents_AutoUnlinksDeletedEvent(t *testing.T) {
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }
 
+// --- "Новый ученик" при выборе события (/events) -----------------------------
+
+// TestCallback_PickEvent_OffersNewStudent — список для привязки события
+// должен всегда предлагать создать нового ученика, а не только выбирать из
+// уже существующих: раньше пустой список учеников был тупиком ("Сначала
+// создайте ученика." без какого-либо действия) — учитель должен был выйти
+// из /events, создать ученика через /students_new и начинать привязку
+// заново.
+func TestCallback_PickEvent_OffersNewStudent(t *testing.T) {
+	h := makeHandler(t)
+	ctx := context.Background()
+	token := h.eventTokens.tokenFor("evt-1")
+
+	cb := &tgbotapi.CallbackQuery{
+		ID:      "cb1",
+		From:    &tgbotapi.User{ID: 999},
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: 999}, MessageID: 1},
+		Data:    cbPickEvent + ":" + token,
+	}
+	h.handleCallback(ctx, cb)
+
+	last := lastEdit(t, h.api.(*fakeTelegramAPI))
+	require.NotNil(t, last.ReplyMarkup)
+	var texts []string
+	var newStudentCB string
+	for _, row := range last.ReplyMarkup.InlineKeyboard {
+		for _, btn := range row {
+			texts = append(texts, btn.Text)
+			if btn.Text == "➕ Новый ученик" {
+				require.NotNil(t, btn.CallbackData)
+				newStudentCB = *btn.CallbackData
+			}
+		}
+	}
+	assert.Contains(t, texts, "➕ Новый ученик")
+	assert.Equal(t, cbNewStudentForEvent+":"+token, newStudentCB)
+}
+
+// TestCallback_NewStudentForEvent_CreatesAndLinks — полный сценарий:
+// /events → выбрать событие → "➕ Новый ученик" → ввести имя → ученик
+// создан и событие сразу привязано к нему, без отдельного похода в
+// /students_new и обратно в /events.
+func TestCallback_NewStudentForEvent_CreatesAndLinks(t *testing.T) {
+	h := makeHandler(t)
+	ctx := context.Background()
+	token := h.eventTokens.tokenFor("evt-1")
+
+	cb := &tgbotapi.CallbackQuery{
+		ID:      "cb1",
+		From:    &tgbotapi.User{ID: 999},
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: 999}, MessageID: 1},
+		Data:    cbNewStudentForEvent + ":" + token,
+	}
+	h.handleCallback(ctx, cb)
+
+	entry := h.dialog.Get(999)
+	assert.Equal(t, StateAwaitingStudentName, entry.State)
+	assert.Equal(t, token, entry.Data[pendingEventKey])
+
+	h.handleTeacherMessage(ctx, &tgbotapi.Message{From: &tgbotapi.User{ID: 999}, Text: "Сергей"})
+
+	assert.Equal(t, StateIdle, h.dialog.Get(999).State, "диалог должен закрыться после создания")
+
+	students, err := h.store.GetStudents(ctx)
+	require.NoError(t, err)
+	require.Len(t, students, 1)
+	assert.Equal(t, "Сергей", students[0].DisplayName)
+
+	linked, err := h.store.GetStudentForEvent(ctx, "evt-1")
+	require.NoError(t, err)
+	assert.Equal(t, students[0].ID, linked.ID)
+
+	api := h.api.(*fakeTelegramAPI)
+	last := api.sent[len(api.sent)-1].(tgbotapi.MessageConfig)
+	assert.Contains(t, last.Text, "создан")
+	assert.Contains(t, last.Text, "событие привязано")
+}
+
+// TestCallback_NewStudentForEvent_StaleToken — бот перезапустили между
+// показом /events и вводом имени нового ученика: eventTokens не переживает
+// перезапуск (см. eventtoken.go), поэтому привязать событие уже нельзя.
+// Ученик всё равно должен быть создан — данные, которые ввёл преподаватель,
+// не должны потеряться, — но с явным сообщением, что до привязки дело не
+// дошло.
+func TestCallback_NewStudentForEvent_StaleToken(t *testing.T) {
+	h := makeHandler(t)
+	ctx := context.Background()
+
+	h.dialog.Set(999, StateAwaitingStudentName, map[string]any{
+		pendingEventKey: "does-not-exist",
+	})
+	h.handleTeacherMessage(ctx, &tgbotapi.Message{From: &tgbotapi.User{ID: 999}, Text: "Сергей"})
+
+	assert.Equal(t, StateIdle, h.dialog.Get(999).State)
+	students, err := h.store.GetStudents(ctx)
+	require.NoError(t, err)
+	require.Len(t, students, 1, "ученик должен быть создан, несмотря на устаревший токен")
+
+	api := h.api.(*fakeTelegramAPI)
+	last := api.sent[len(api.sent)-1].(tgbotapi.MessageConfig)
+	assert.Contains(t, last.Text, "устарел")
+}
+
 // lastEdit достаёт последнее отправленное EditMessageTextConfig — то, чем
 // editText() обновляет сообщение с inline-клавиатурой.
 func lastEdit(t *testing.T, api *fakeTelegramAPI) tgbotapi.EditMessageTextConfig {

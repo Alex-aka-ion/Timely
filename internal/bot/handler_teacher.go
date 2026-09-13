@@ -19,8 +19,11 @@ import (
 // upcomingHorizon — сколько вперёд показывать события в команде /events.
 const upcomingHorizon = 14 * 24 * time.Hour
 
-// pendingEventKey — ключ в Dialog.Data: master_event_id события, которое мы
-// привязываем к ученику.
+// pendingEventKey — ключ в Dialog.Data: токен события (eventtoken.go),
+// которое привяжем к ученику сразу после его создания (см.
+// cbNewStudentForEvent). Именно токен, а не сам master_event_id — событие
+// уже показывалось через /events и токен для него выпущен, отдельного
+// способа идентифицировать то же событие заводить не нужно.
 const pendingEventKey = "pending_event_id"
 
 // pendingStudentKey — ID ученика, к которому привязываем нового родителя.
@@ -297,6 +300,29 @@ func (h *Handler) handleTeacherMessage(ctx context.Context, msg *tgbotapi.Messag
 				return
 			}
 			h.send(from.ID, fmt.Sprintf("Ученик %q создан и родитель привязан.", st.DisplayName))
+		} else if token, ok := state.Data[pendingEventKey].(string); ok {
+			// Сценарий "выбор события в /events → новый ученик" (кнопка
+			// "➕ Новый ученик" из cbNewStudentForEvent).
+			eid, ok := h.eventTokens.resolve(token)
+			if !ok {
+				h.send(from.ID, fmt.Sprintf(
+					"Ученик %q создан, но список событий устарел — привяжите его через /events заново.",
+					st.DisplayName))
+				h.dialog.ClearState(from.ID)
+				return
+			}
+			if err := h.store.LinkEvent(ctx, eid, st.ID); err != nil {
+				log.Error("LinkEvent", "error", err)
+				h.send(from.ID, "Ученик создан, но не удалось привязать событие.")
+				h.dialog.ClearState(from.ID)
+				return
+			}
+			h.send(from.ID, fmt.Sprintf("Ученик %q создан и событие привязано.", st.DisplayName))
+			h.dialog.ClearState(from.ID)
+			// Привязка уже сохранена — уведомление родителей best-effort, как
+			// и в cbPickStudent (см. саму функцию).
+			h.notifyContactsAboutNewEvent(ctx, st.ID, eid)
+			return
 		} else {
 			h.send(from.ID, fmt.Sprintf("Ученик %q создан.", st.DisplayName))
 		}
@@ -624,13 +650,7 @@ func (h *Handler) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery
 			h.answerCallback(cb.ID, "Ошибка")
 			return
 		}
-		if len(students) == 0 {
-			h.editText(cb.Message.Chat.ID, cb.Message.MessageID,
-				"Сначала создайте ученика.", nil)
-			h.answerCallback(cb.ID, "")
-			return
-		}
-		rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(students))
+		rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(students)+1)
 		for _, s := range students {
 			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData(
@@ -640,9 +660,28 @@ func (h *Handler) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery
 				),
 			))
 		}
+		// Тем же токеном, что и cbPickStudent выше, — чтобы после создания
+		// ученика привязать к нему именно это событие (см. pendingEventKey
+		// и case StateAwaitingStudentName в handleTeacherMessage).
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("➕ Новый ученик", cbNewStudentForEvent+":"+token),
+		))
 		kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
 		h.editText(cb.Message.Chat.ID, cb.Message.MessageID,
 			"Выберите ученика для события:", &kb)
+		h.answerCallback(cb.ID, "")
+
+	case cbNewStudentForEvent:
+		token := rest
+		if _, ok := h.eventTokens.resolve(token); !ok {
+			h.answerCallback(cb.ID, "Список устарел, вызовите /events заново")
+			return
+		}
+		h.dialog.Set(from.ID, StateAwaitingStudentName, map[string]any{
+			pendingEventKey: token,
+		})
+		h.editText(cb.Message.Chat.ID, cb.Message.MessageID,
+			"Введите имя нового ученика:", nil)
 		h.answerCallback(cb.ID, "")
 
 	case cbPickStudent:
