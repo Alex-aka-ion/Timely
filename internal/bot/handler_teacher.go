@@ -107,6 +107,44 @@ func (h *Handler) handleUnlinked(ctx context.Context, msg *tgbotapi.Message) {
 	}
 }
 
+// --- /unlinked_students -------------------------------------------------------
+
+// handleUnlinkedStudents — обратная выборка к /unlinked: там показывались
+// зарегистрированные РОДИТЕЛИ без ученика, здесь — УЧЕНИКИ без единого
+// привязанного родителя (store.GetUnlinkedStudents). Кнопка каждого пункта
+// открывает обычную карточку ученика (cbStudentMenu) — оттуда преподаватель
+// уже может управлять контактами/интервалами/именем как для любого другого
+// ученика.
+func (h *Handler) handleUnlinkedStudents(ctx context.Context, msg *tgbotapi.Message) {
+	if !h.requireTeacher(msg.From.ID) {
+		return
+	}
+	students, err := h.store.GetUnlinkedStudents(ctx)
+	if err != nil {
+		logger.FromContext(ctx).Error("GetUnlinkedStudents", "error", err)
+		h.send(msg.From.ID, "Ошибка.")
+		return
+	}
+	if len(students) == 0 {
+		h.send(msg.From.ID, "У всех учеников есть хотя бы один привязанный контакт.")
+		return
+	}
+	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(students))
+	for _, st := range students {
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(
+				st.DisplayName,
+				fmt.Sprintf("%s:%d", cbStudentMenu, st.ID),
+			),
+		))
+	}
+	out := tgbotapi.NewMessage(msg.From.ID, "Ученики без привязанного родителя:")
+	out.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	if _, err := h.api.Send(out); err != nil {
+		logger.FromContext(ctx).Error("send /unlinked_students", "error", err)
+	}
+}
+
 // --- /events ----------------------------------------------------------------
 
 func (h *Handler) handleEvents(ctx context.Context, msg *tgbotapi.Message) {

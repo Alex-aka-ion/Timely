@@ -125,6 +125,8 @@ func (h *Handler) handleUpdate(ctx context.Context, upd tgbotapi.Update) {
 			h.handleStudentsNew(ctx, msg)
 		case "unlinked":
 			h.handleUnlinked(ctx, msg)
+		case "unlinked_students":
+			h.handleUnlinkedStudents(ctx, msg)
 		case "events":
 			h.handleEvents(ctx, msg)
 		case "settings":
@@ -224,6 +226,8 @@ func (h *Handler) menuAction(userID int64, text string) (func(context.Context, *
 			return h.runMenuAction(userID, h.handleStudentsNew), true
 		case btnUnlinked:
 			return h.runMenuAction(userID, h.handleUnlinked), true
+		case btnUnlinkedStudents:
+			return h.runMenuAction(userID, h.handleUnlinkedStudents), true
 		case btnEvents:
 			return h.runMenuAction(userID, h.handleEvents), true
 		case btnSettings:

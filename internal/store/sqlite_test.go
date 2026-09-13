@@ -235,6 +235,27 @@ func TestUnlinkedUsers(t *testing.T) {
 	assert.Equal(t, u1.ID, users[0].ID)
 }
 
+func TestGetUnlinkedStudents(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	stWithout, _ := s.CreateStudent(ctx, "Без родителя")
+	stWith, _ := s.CreateStudent(ctx, "С родителем")
+	u, _ := s.CreateUser(ctx, "Мама")
+	require.NoError(t, s.LinkContact(ctx, stWith.ID, u.ID, "Мама"))
+
+	students, err := s.GetUnlinkedStudents(ctx)
+	require.NoError(t, err)
+	require.Len(t, students, 1)
+	assert.Equal(t, stWithout.ID, students[0].ID)
+
+	// После отвязки контакта ученик снова должен появиться в списке.
+	require.NoError(t, s.UnlinkContact(ctx, stWith.ID, u.ID))
+	students, err = s.GetUnlinkedStudents(ctx)
+	require.NoError(t, err)
+	assert.Len(t, students, 2)
+}
+
 func TestStudentIntervals(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

@@ -306,6 +306,30 @@ func (s *SQLiteStore) GetStudents(ctx context.Context) ([]Student, error) {
 	return out, rows.Err()
 }
 
+// GetUnlinkedStudents возвращает учеников без единого привязанного контакта
+// (student_contacts) — см. комментарий у интерфейса в store.go.
+func (s *SQLiteStore) GetUnlinkedStudents(ctx context.Context) ([]Student, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, display_name, COALESCE(notes,''), COALESCE(reminder_intervals,''), created_at
+		FROM students st
+		WHERE NOT EXISTS (SELECT 1 FROM student_contacts sc WHERE sc.student_id = st.id)
+		ORDER BY display_name
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Student
+	for rows.Next() {
+		var st Student
+		if err := rows.Scan(&st.ID, &st.DisplayName, &st.Notes, &st.ReminderIntervals, &st.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, st)
+	}
+	return out, rows.Err()
+}
+
 func (s *SQLiteStore) GetStudentForEvent(ctx context.Context, masterEventID string) (Student, error) {
 	var st Student
 	var notes, intervals sql.NullString

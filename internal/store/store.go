@@ -100,6 +100,14 @@ type Store interface {
 	// которые ещё не привязаны ни к одному ученику.
 	GetUnlinkedUsers(ctx context.Context) ([]User, error)
 
+	// GetUnlinkedStudents возвращает учеников, к которым не привязан ни один
+	// родитель (контакт). Обратная выборка к GetUnlinkedUsers: та ищет
+	// родителей без ученика, эта — учеников без родителя (у них разное
+	// применение: GetUnlinkedUsers — для сценария "родитель написал боту,
+	// привяжи его к существующему ученику", GetUnlinkedStudents — чтобы
+	// преподаватель видел, каким ученикам ещё вообще не назначен контакт).
+	GetUnlinkedStudents(ctx context.Context) ([]Student, error)
+
 	// students -------------------------------------------------------------
 
 	CreateStudent(ctx context.Context, name string) (Student, error)

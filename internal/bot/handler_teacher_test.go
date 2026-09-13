@@ -63,6 +63,74 @@ func TestRequireTeacher_BlocksNonTeacher(t *testing.T) {
 	assert.Equal(t, StateIdle, h.dialog.Get(1).State)
 }
 
+// --- /unlinked_students ------------------------------------------------------
+
+// TestHandleUnlinkedStudents_ShowsOnlyStudentsWithoutContacts — проверяет,
+// что в список попадают ровно ученики без единого привязанного контакта,
+// а не наоборот (это как раз обратная выборка к /unlinked, которую легко
+// перепутать местами).
+func TestHandleUnlinkedStudents_ShowsOnlyStudentsWithoutContacts(t *testing.T) {
+	h := makeHandler(t)
+	ctx := context.Background()
+
+	without, err := h.store.CreateStudent(ctx, "Сергей")
+	require.NoError(t, err)
+	with, err := h.store.CreateStudent(ctx, "Петя")
+	require.NoError(t, err)
+	u, err := h.store.CreateUser(ctx, "Мама")
+	require.NoError(t, err)
+	require.NoError(t, h.store.LinkContact(ctx, with.ID, u.ID, "Мама"))
+
+	h.handleUnlinkedStudents(ctx, &tgbotapi.Message{From: &tgbotapi.User{ID: 999}})
+
+	api := h.api.(*fakeTelegramAPI)
+	require.NotEmpty(t, api.sent)
+	last := api.sent[len(api.sent)-1].(tgbotapi.MessageConfig)
+	// Имена учеников — это подписи кнопок, а не текст сообщения (см.
+	// handleUnlinkedStudents), поэтому проверяем именно клавиатуру.
+	buttons := inlineButtonTexts(t, last)
+	assert.Contains(t, buttons, without.DisplayName)
+	assert.NotContains(t, buttons, with.DisplayName)
+}
+
+// inlineButtonTexts достаёт подписи всех inline-кнопок сообщения — удобно
+// для проверки списков, где полезная нагрузка (имя ученика/родителя) лежит
+// в кнопке, а не в тексте сообщения.
+func inlineButtonTexts(t *testing.T, msg tgbotapi.MessageConfig) []string {
+	t.Helper()
+	kb, ok := msg.ReplyMarkup.(tgbotapi.InlineKeyboardMarkup)
+	if !ok {
+		return nil
+	}
+	var texts []string
+	for _, row := range kb.InlineKeyboard {
+		for _, btn := range row {
+			texts = append(texts, btn.Text)
+		}
+	}
+	return texts
+}
+
+// TestHandleUnlinkedStudents_AllLinked — если у всех учеников есть контакт,
+// должно быть вежливое сообщение, а не пустая клавиатура.
+func TestHandleUnlinkedStudents_AllLinked(t *testing.T) {
+	h := makeHandler(t)
+	ctx := context.Background()
+
+	st, err := h.store.CreateStudent(ctx, "Петя")
+	require.NoError(t, err)
+	u, err := h.store.CreateUser(ctx, "Мама")
+	require.NoError(t, err)
+	require.NoError(t, h.store.LinkContact(ctx, st.ID, u.ID, "Мама"))
+
+	h.handleUnlinkedStudents(ctx, &tgbotapi.Message{From: &tgbotapi.User{ID: 999}})
+
+	api := h.api.(*fakeTelegramAPI)
+	require.NotEmpty(t, api.sent)
+	last := api.sent[len(api.sent)-1].(tgbotapi.MessageConfig)
+	assert.Contains(t, last.Text, "хотя бы один")
+}
+
 // --- переименование ученика ------------------------------------------------
 
 // TestCallback_RenameStudent_SetsState — нажатие "Переименовать" в меню

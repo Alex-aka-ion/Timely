@@ -122,13 +122,14 @@ func kbConfirm(confirmCB, cancelCB string) tgbotapi.InlineKeyboardMarkup {
 // разбираются в bot.go (см. menuAction).
 
 const (
-	btnStudents    = "👥 Ученики"
-	btnStudentsNew = "➕ Новый ученик"
-	btnUnlinked    = "🔗 Не привязаны"
-	btnEvents      = "📅 События"
-	btnSettings    = "⚙️ Настройки"
-	btnMyStudents  = "👶 Мои ученики"
-	btnRename      = "✏️ Изменить имя"
+	btnStudents         = "👥 Ученики"
+	btnStudentsNew      = "➕ Новый ученик"
+	btnUnlinked         = "🔗 Не привязаны"
+	btnUnlinkedStudents = "🧒 Ученики без родителя"
+	btnEvents           = "📅 События"
+	btnSettings         = "⚙️ Настройки"
+	btnMyStudents       = "👶 Мои ученики"
+	btnRename           = "✏️ Изменить имя"
 )
 
 // menuKeyboardTeacher — постоянное меню преподавателя: по кнопке на каждую
@@ -142,9 +143,10 @@ func menuKeyboardTeacher() tgbotapi.ReplyKeyboardMarkup {
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton(btnUnlinked),
-			tgbotapi.NewKeyboardButton(btnEvents),
+			tgbotapi.NewKeyboardButton(btnUnlinkedStudents),
 		),
 		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(btnEvents),
 			tgbotapi.NewKeyboardButton(btnSettings),
 		),
 	)
