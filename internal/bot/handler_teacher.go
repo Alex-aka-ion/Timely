@@ -920,7 +920,7 @@ func (h *Handler) notifyContactsAboutNewEvent(ctx context.Context, studentID int
 		return
 	}
 
-	text := fmt.Sprintf("Занятие у %s назначено:\n%s", student.DisplayName, formatEvent(ev.Start, ev.Summary))
+	text := fmt.Sprintf("Занятие у %s назначено:\n%s", student.DisplayName, ev.Start.Local().Format("Mon 02.01 в 15:04 MST"))
 	for _, c := range contacts {
 		if err := h.dispatch.SendToUser(ctx, c.UserID, text); err != nil {
 			log.Error("SendToUser (уведомление о привязке события)", "user_id", c.UserID, "error", err)

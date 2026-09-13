@@ -199,7 +199,9 @@ func TestCallback_StopRemove_UnlinksFromAllStudents(t *testing.T) {
 
 // TestCallback_PickStudent_NotifiesContacts — привязка события к ученику
 // (cbPickStudent) должна уведомить всех контактов ученика о назначенном
-// времени занятия, используя реальные Summary/Start из календаря.
+// времени занятия, используя реальный Start из календаря. Текст сообщения
+// умышленно не включает Summary события — название в Google Calendar
+// заполняет преподаватель для себя, родителю нужно только время.
 func TestCallback_PickStudent_NotifiesContacts(t *testing.T) {
 	cfg := &config.Config{TeacherTelegramID: 999, GoogleCalendarID: "primary"}
 	st := newTestStore(t)
@@ -235,7 +237,9 @@ func TestCallback_PickStudent_NotifiesContacts(t *testing.T) {
 	require.Len(t, sender.sent, 1, "родитель должен получить ровно одно уведомление")
 	assert.Equal(t, "1", sender.sent[0].ExternalID)
 	assert.Contains(t, sender.sent[0].Text, "Сергей")
-	assert.Contains(t, sender.sent[0].Text, "занятие")
+	assert.Contains(t, sender.sent[0].Text, "назначено")
+	assert.NotContains(t, sender.sent[0].Text, "Сергей занятие",
+		"Summary события из календаря не должен попадать в сообщение родителю")
 }
 
 func itoa(v int64) string {

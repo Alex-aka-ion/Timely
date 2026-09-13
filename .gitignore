@@ -3,7 +3,9 @@
 .env.local
 *.env
 credentials.json
+credentials_*.json
 token.json
+token_*.json
 
 # База данных
 data/

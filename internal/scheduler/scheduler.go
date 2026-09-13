@@ -269,8 +269,8 @@ func (s *Scheduler) detectChange(ctx context.Context, in calendar.Instance, stud
 	switch {
 	case in.Status == calendar.StatusCancelled:
 		s.notifyContacts(ctx, student, fmt.Sprintf(
-			"Занятие у %s отменено.\n%s\nБыло запланировано на %s",
-			student.DisplayName, in.Summary, formatWhen(prev.Start)))
+			"Занятие у %s отменено.\nБыло запланировано на %s",
+			student.DisplayName, formatWhen(prev.Start)))
 		if err := s.store.MarkEventCancelled(ctx, in.ID); err != nil {
 			log.Error("MarkEventCancelled", "instance_id", in.ID, "error", err)
 		}
