@@ -125,13 +125,15 @@ nano .env  # BOT_TOKEN, TEACHER_TELEGRAM_ID, TZ (часовой пояс зан�
 # 2. Локально: скопировать на сервер уже полученные OAuth-файлы
 scp credentials.json token.json user@server:/opt/booking-bot/
 
-# 3. На сервере: каталог под БД — заранее и с владельцем, который
-# совпадает с UID/GID процесса внутри контейнера (10001, см. Dockerfile).
-# Без этого шага docker compose сам создаст ./data при первом volume
-# mount, но от имени хостового root — непривилегированный процесс
-# внутри контейнера не сможет туда писать (permission denied при
-# открытии БД).
+# 3. На сервере: каталог под БД и сами OAuth-файлы — владелец/права должны
+# совпадать с UID/GID процесса внутри контейнера (10001, см. Dockerfile),
+# иначе непривилегированный процесс не сможет их прочитать/писать в них
+# (permission denied — и для ./data при открытии БД, и для
+# credentials.json/token.json при чтении). ./data при этом ещё и должен
+# существовать заранее: если его нет, docker compose создаст volume сам
+# при первом mount, но от имени хостового root.
 mkdir -p data && chown 10001:10001 data
+chown 10001:10001 credentials.json token.json && chmod 600 credentials.json token.json
 
 # 4. На сервере: собрать и запустить
 docker compose up -d --build
