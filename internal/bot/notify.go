@@ -43,6 +43,25 @@ func (u *TelegramAdminUI) NotifyNewUser(ctx context.Context, userID int64, fullN
 	return nil
 }
 
+// NotifyStopRequest сообщает преподавателю, что родитель отправил /stop и
+// перестал получать сообщения бота. Кнопки: [Удалить из контактов] [Оставить] —
+// решение убрать родителя из контактов учеников остаётся за преподавателем,
+// сам /stop только отключает доставку сообщений этому конкретному аккаунту.
+func (u *TelegramAdminUI) NotifyStopRequest(ctx context.Context, userID int64, fullName string) error {
+	log := logger.FromContext(ctx)
+	text := fmt.Sprintf(
+		"Родитель %s отправил /stop и больше не получает сообщения бота (включая напоминания).\n"+
+			"Удалить его из контактов учеников?", fullName)
+	msg := tgbotapi.NewMessage(u.teacherID, text)
+	msg.ReplyMarkup = kbStopRequest(userID)
+	if _, err := u.api.Send(msg); err != nil {
+		log.Error("notify stop request", "user_id", userID, "error", err)
+		return err
+	}
+	log.Info("notified teacher about stop request", "user_id", userID)
+	return nil
+}
+
 // NotifyError сообщает преподавателю о бизнес-ошибке.
 // Использует только summary в логе — detail может содержать чувствительные данные.
 func (u *TelegramAdminUI) NotifyError(ctx context.Context, summary, detail string) error {

@@ -101,6 +101,58 @@ func (h *Handler) handleParentMessage(ctx context.Context, msg *tgbotapi.Message
 	}
 }
 
+// handleStop — команда /stop: родитель отказывается получать сообщения бота.
+//
+// Мы НЕ удаляем сразу связи с учениками — это затрагивает бизнес-данные
+// (перестанут приходить напоминания конкретному человеку), и решение
+// оставляем преподавателю. Вместо этого:
+//  1. Немедленно деактивируем telegram-аккаунт — notify.Dispatcher берёт
+//     только активные аккаунты (store.GetActiveAccounts), так что доставка
+//     сообщений (включая напоминания планировщика) прекращается сразу же,
+//     ещё до решения преподавателя.
+//  2. Уведомляем преподавателя с кнопками [Удалить из контактов] [Оставить] —
+//     см. admin.UI.NotifyStopRequest и cbStopRemove в handler_teacher.go.
+//
+// Если родитель передумает — /start реактивирует тот же аккаунт (см.
+// комментарий у store.SaveAccount).
+func (h *Handler) handleStop(ctx context.Context, msg *tgbotapi.Message) {
+	log := logger.FromContext(ctx)
+	from := msg.From
+
+	if h.isTeacher(from.ID) {
+		h.send(from.ID, "Команда /stop предназначена для родителей.")
+		return
+	}
+	if !h.rl.Allow(from.ID) {
+		return
+	}
+
+	user, err := h.store.GetUserByAccount(ctx, MessengerName, externalID(from.ID))
+	if errors.Is(err, store.ErrNotFound) {
+		h.send(from.ID, "Вы ещё не зарегистрированы.")
+		return
+	}
+	if err != nil {
+		log.Error("GetUserByAccount", "error", err)
+		h.send(from.ID, "Произошла ошибка. Попробуйте позже.")
+		return
+	}
+
+	if err := h.store.DeactivateAccount(ctx, MessengerName, externalID(from.ID)); err != nil {
+		log.Error("DeactivateAccount", "user_id", user.ID, "error", err)
+		h.send(from.ID, "Не удалось выполнить. Попробуйте позже.")
+		return
+	}
+
+	h.send(from.ID,
+		"Вы больше не будете получать сообщения от бота. "+
+			"Если захотите возобновить — отправьте /start.")
+
+	if err := h.adminUI.NotifyStopRequest(ctx, user.ID, user.FullName); err != nil {
+		log.Error("уведомление преподавателя о /stop", "user_id", user.ID, "error", err)
+	}
+}
+
 // --- "Мои ученики" (кнопка меню родителя) ------------------------------------
 
 // handleMyStudents показывает родителю список привязанных к нему учеников.

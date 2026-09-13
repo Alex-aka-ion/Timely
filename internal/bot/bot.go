@@ -129,6 +129,8 @@ func (h *Handler) handleUpdate(ctx context.Context, upd tgbotapi.Update) {
 			h.handleEvents(ctx, msg)
 		case "settings":
 			h.handleSettings(ctx, msg)
+		case "stop":
+			h.handleStop(ctx, msg)
 		case "cancel":
 			// ВАЖНО: это единственное реальное место для /cancel. Любое
 			// сообщение вида "/слово" — это msg.IsCommand()==true, поэтому

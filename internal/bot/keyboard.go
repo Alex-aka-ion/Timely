@@ -9,19 +9,20 @@ import (
 // Префиксы callback_data для маршрутизации inline-кнопок.
 // Формат: "<префикс>:<id>" или "<префикс>:<id>:<sub>".
 const (
-	cbNewStudent     = "new_student"     // создать ученика для нового родителя; данные: user_id
-	cbExistStudent   = "exist_student"   // показать список учеников для нового родителя; данные: user_id
-	cbLinkContact    = "link_contact"    // привязать существующего ученика к родителю; данные: user_id:student_id
-	cbUnlinkContact  = "unlink_contact"  // отвязать; данные: student_id:user_id
-	cbUnlinkContactC = "unlink_cont_c"   // подтверждение отвязки контакта; данные: student_id:user_id
-	cbUnlinkEvent    = "unlink_event"    // отвязать событие от ученика; данные: master_event_id
-	cbUnlinkEventC   = "unlink_event_c"  // подтверждение; данные: master_event_id
-	cbStudentMenu    = "student"         // показать меню ученика; данные: student_id
-	cbStudentContact = "student_cont"    // меню "контакты"; данные: student_id
-	cbPickEvent      = "pick_event"      // выбран event для привязки; данные: master_event_id
-	cbPickStudent    = "pick_student"    // выбран ученик для события; данные: master_event_id:student_id
-	cbSetIntervals   = "set_intervals"   // изменить интервалы ученика; данные: student_id
-	cbCancel         = "cancel"          // отменить текущее действие
+	cbNewStudent     = "new_student"    // создать ученика для нового родителя; данные: user_id
+	cbExistStudent   = "exist_student"  // показать список учеников для нового родителя; данные: user_id
+	cbLinkContact    = "link_contact"   // привязать существующего ученика к родителю; данные: user_id:student_id
+	cbUnlinkContact  = "unlink_contact" // отвязать; данные: student_id:user_id
+	cbUnlinkContactC = "unlink_cont_c"  // подтверждение отвязки контакта; данные: student_id:user_id
+	cbUnlinkEvent    = "unlink_event"   // отвязать событие от ученика; данные: master_event_id
+	cbUnlinkEventC   = "unlink_event_c" // подтверждение; данные: master_event_id
+	cbStudentMenu    = "student"        // показать меню ученика; данные: student_id
+	cbStudentContact = "student_cont"   // меню "контакты"; данные: student_id
+	cbPickEvent      = "pick_event"     // выбран event для привязки; данные: master_event_id
+	cbPickStudent    = "pick_student"   // выбран ученик для события; данные: master_event_id:student_id
+	cbSetIntervals   = "set_intervals"  // изменить интервалы ученика; данные: student_id
+	cbStopRemove     = "stop_remove"    // удалить родителя из всех контактов после /stop; данные: user_id
+	cbCancel         = "cancel"         // отменить текущее действие
 )
 
 // kbNewUserChoice — кнопки "Новый ученик / К существующему" для нового родителя.
@@ -74,6 +75,22 @@ func kbStudentMenu(studentID int64) tgbotapi.InlineKeyboardMarkup {
 				"Изменить интервалы",
 				fmt.Sprintf("%s:%d", cbSetIntervals, studentID),
 			),
+		),
+	)
+}
+
+// kbStopRequest — кнопки для решения преподавателя после /stop родителя:
+// либо насовсем убрать его из контактов всех учеников, либо оставить как
+// есть (аккаунт всё равно уже деактивирован — сообщения приходить не будут,
+// пока родитель сам не пришлёт /start).
+func kbStopRequest(userID int64) tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(
+				"Удалить из контактов",
+				fmt.Sprintf("%s:%d", cbStopRemove, userID),
+			),
+			tgbotapi.NewInlineKeyboardButtonData("Оставить", cbCancel),
 		),
 	)
 }

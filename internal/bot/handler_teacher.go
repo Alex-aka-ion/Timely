@@ -10,6 +10,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
+	"github.com/booking-bot/booking-bot/internal/calendar"
 	"github.com/booking-bot/booking-bot/internal/config"
 	"github.com/booking-bot/booking-bot/internal/logger"
 	"github.com/booking-bot/booking-bot/internal/store"
@@ -511,6 +512,34 @@ func (h *Handler) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery
 		}
 		h.editText(cb.Message.Chat.ID, cb.Message.MessageID, "Событие привязано.", nil)
 		h.answerCallback(cb.ID, "Готово")
+		// Привязка уже сохранена — уведомление родителей best-effort и не
+		// должно ничего откатывать при ошибке (см. саму функцию).
+		h.notifyContactsAboutNewEvent(ctx, sid, eid)
+
+	case cbStopRemove:
+		// Преподаватель подтвердил удаление родителя из контактов после
+		// его /stop (см. handleStop в handler_parent.go и
+		// admin.UI.NotifyStopRequest). Отвязываем от ВСЕХ учеников сразу —
+		// в отличие от cbUnlinkContact, здесь это не точечное действие по
+		// одному ученику, а полная очистка по инициативе самого родителя.
+		uid, err := strconv.ParseInt(rest, 10, 64)
+		if err != nil {
+			h.answerCallback(cb.ID, "Неверные данные")
+			return
+		}
+		students, err := h.store.GetStudentsByContact(ctx, uid)
+		if err != nil {
+			log.Error("GetStudentsByContact", "user_id", uid, "error", err)
+			h.answerCallback(cb.ID, "Ошибка")
+			return
+		}
+		for _, s := range students {
+			if err := h.store.UnlinkContact(ctx, s.ID, uid); err != nil && !errors.Is(err, store.ErrNotFound) {
+				log.Error("UnlinkContact", "student_id", s.ID, "user_id", uid, "error", err)
+			}
+		}
+		h.editText(cb.Message.Chat.ID, cb.Message.MessageID, "Родитель удалён из контактов.", nil)
+		h.answerCallback(cb.ID, "Готово")
 
 	case cbSetIntervals:
 		sid, err := strconv.ParseInt(rest, 10, 64)
@@ -562,4 +591,87 @@ func (h *Handler) studentDetails(ctx context.Context, studentID int64) (string, 
 		fmt.Fprintf(&sb, "  • %s (%s)\n", c.FullName, c.Label)
 	}
 	return sb.String(), kbStudentMenu(studentID), nil
+}
+
+// notifyContactsAboutNewEvent уведомляет всех родителей ученика о том, что
+// занятию назначено конкретное время — событие Google Calendar только что
+// привязали к ученику через cbPickStudent. Родитель до этого момента мог
+// вообще не знать, когда состоится занятие.
+//
+// Best-effort: сама привязка (store.LinkEvent) уже сохранена к моменту
+// вызова этой функции, поэтому любая её собственная ошибка — только в лог,
+// без отката привязки и без сообщения об ошибке преподавателю (тот уже
+// увидел "Событие привязано").
+func (h *Handler) notifyContactsAboutNewEvent(ctx context.Context, studentID int64, masterEventID string) {
+	log := logger.FromContext(ctx)
+
+	if h.dispatch == nil {
+		return
+	}
+
+	contacts, err := h.store.GetStudentContacts(ctx, studentID)
+	if err != nil {
+		log.Error("GetStudentContacts (уведомление о привязке события)", "student_id", studentID, "error", err)
+		return
+	}
+	if len(contacts) == 0 {
+		return
+	}
+
+	student, err := h.findStudent(ctx, studentID)
+	if err != nil {
+		log.Error("findStudent (уведомление о привязке события)", "student_id", studentID, "error", err)
+		return
+	}
+
+	// LinkEvent получает на входе только master_event_id — ни времени, ни
+	// названия. У calendar.Client нет метода "получить одно событие по ID"
+	// (см. internal/calendar/client.go), поэтому достаём их тем же способом,
+	// что и /events — свежим списком UpcomingMasters.
+	if h.calClient == nil {
+		return
+	}
+	events, err := h.calClient.UpcomingMasters(ctx, h.cfg.GoogleCalendarID, upcomingHorizon)
+	if err != nil {
+		log.Error("UpcomingMasters (уведомление о привязке события)", "error", err)
+		return
+	}
+	var ev *calendar.Event
+	for i := range events {
+		if events[i].ID == masterEventID {
+			ev = &events[i]
+			break
+		}
+	}
+	if ev == nil {
+		// Событие могло исчезнуть из ближайших upcomingHorizon между показом
+		// /events и нажатием кнопки — редкий случай гонки, не повод падать.
+		log.Warn("событие не найдено для уведомления о привязке", "master_event_id", masterEventID)
+		return
+	}
+
+	text := fmt.Sprintf("Занятие у %s назначено:\n%s", student.DisplayName, formatEvent(ev.Start, ev.Summary))
+	for _, c := range contacts {
+		if err := h.dispatch.SendToUser(ctx, c.UserID, text); err != nil {
+			log.Error("SendToUser (уведомление о привязке события)", "user_id", c.UserID, "error", err)
+			continue
+		}
+		log.Info("уведомление о новом времени занятия отправлено", "student_id", studentID, "user_id", c.UserID)
+	}
+}
+
+// findStudent возвращает ученика по ID. У Store нет прямого GetStudent(id) —
+// только список целиком (GetStudents), поэтому ищем в нём же, как и
+// studentDetails выше.
+func (h *Handler) findStudent(ctx context.Context, studentID int64) (store.Student, error) {
+	students, err := h.store.GetStudents(ctx)
+	if err != nil {
+		return store.Student{}, err
+	}
+	for _, s := range students {
+		if s.ID == studentID {
+			return s, nil
+		}
+	}
+	return store.Student{}, store.ErrNotFound
 }
