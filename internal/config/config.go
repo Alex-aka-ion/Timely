@@ -17,6 +17,13 @@ type Config struct {
 	// Telegram
 	BotToken          string
 	TeacherTelegramID int64
+	// DevTelegramID — необязательный второй telegram_id с теми же правами,
+	// что у преподавателя (isTeacher в bot.go проверяет оба). Нужен, чтобы
+	// разработчик мог параллельно с преподавателем видеть все действия и
+	// уведомления (admin.UI шлёт их обоим — см. TelegramAdminUI) и при
+	// необходимости сам нажимать кнопки/выполнять команды преподавателя,
+	// не деля с ним один аккаунт. 0, если не задан.
+	DevTelegramID int64
 
 	// База данных
 	DBPath string
@@ -66,6 +73,19 @@ func Load() (*Config, error) {
 	}
 	c.TeacherTelegramID = teacherID
 
+	// DEV_TELEGRAM_ID необязателен — в отличие от TEACHER_TELEGRAM_ID,
+	// пустое значение не ошибка, а просто "не задан" (0).
+	if devIDStr := strings.TrimSpace(os.Getenv("DEV_TELEGRAM_ID")); devIDStr != "" {
+		devID, err := strconv.ParseInt(devIDStr, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("DEV_TELEGRAM_ID должен быть числом: %w", err)
+		}
+		if devID <= 0 {
+			return nil, errors.New("DEV_TELEGRAM_ID должен быть положительным числом")
+		}
+		c.DevTelegramID = devID
+	}
+
 	intervals, err := ParseIntervals(getenvOr("REMINDER_INTERVALS", "24h,2h"))
 	if err != nil {
 		return nil, fmt.Errorf("REMINDER_INTERVALS: %w", err)
@@ -94,6 +114,9 @@ func (c *Config) Validate() error {
 	}
 	if c.TeacherTelegramID <= 0 {
 		return errors.New("TEACHER_TELEGRAM_ID должен быть положительным")
+	}
+	if c.DevTelegramID < 0 {
+		return errors.New("DEV_TELEGRAM_ID не может быть отрицательным")
 	}
 	if c.DBPath == "" {
 		return errors.New("DB_PATH не задан")

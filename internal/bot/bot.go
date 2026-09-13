@@ -168,10 +168,16 @@ func (h *Handler) handleUpdate(ctx context.Context, upd tgbotapi.Update) {
 	h.handleParentMessage(ctx, msg)
 }
 
-// isTeacher возвращает true если пользователь — преподаватель.
-// Роль определяется по telegram_id из конфига.
+// isTeacher возвращает true если у пользователя права преподавателя.
+// Роль определяется по telegram_id из конфига: сам преподаватель или —
+// если задан — разработчик (DevTelegramID), подключающийся параллельно с
+// теми же правами, чтобы наблюдать за работой бота и при необходимости
+// самому выполнять преподавательские действия.
 func (h *Handler) isTeacher(userID int64) bool {
-	return userID == h.cfg.TeacherTelegramID
+	if userID == h.cfg.TeacherTelegramID {
+		return true
+	}
+	return h.cfg.DevTelegramID != 0 && userID == h.cfg.DevTelegramID
 }
 
 // requireTeacher молча игнорирует не-преподавательские запросы.

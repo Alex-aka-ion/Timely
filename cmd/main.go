@@ -106,8 +106,9 @@ func main() {
 	tgSender := bot.NewTelegramSender(tgAPI)
 	dispatcher := notify.NewDispatcher(st, tgSender)
 
-	// Admin UI.
-	adminUI := bot.NewTelegramAdminUI(tgAPI, cfg.TeacherTelegramID)
+	// Admin UI. DevTelegramID может быть не задан (0) — NewTelegramAdminUI
+	// сам отбрасывает такие ID, поэтому передаём как есть.
+	adminUI := bot.NewTelegramAdminUI(tgAPI, cfg.TeacherTelegramID, cfg.DevTelegramID)
 
 	// Bot Handler.
 	handler := bot.NewHandler(bot.HandlerDeps{

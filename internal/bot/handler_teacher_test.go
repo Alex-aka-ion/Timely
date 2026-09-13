@@ -49,6 +49,31 @@ func TestIsTeacher(t *testing.T) {
 	assert.False(t, h.isTeacher(1))
 }
 
+// TestIsTeacher_DevID — разработчик (Config.DevTelegramID) должен получать
+// те же права, что и сам преподаватель, чтобы подключаться параллельно и
+// видеть/делать то же самое.
+func TestIsTeacher_DevID(t *testing.T) {
+	cfg := &config.Config{
+		TeacherTelegramID: 999,
+		DevTelegramID:     777,
+		ReminderIntervals: []time.Duration{2 * time.Hour},
+		SchedulerTick:     time.Minute,
+	}
+	h := NewHandler(HandlerDeps{API: &fakeTelegramAPI{}, Cfg: cfg, Store: newTestStore(t), AdminUI: admin.Noop{}})
+	assert.True(t, h.isTeacher(999), "сам преподаватель")
+	assert.True(t, h.isTeacher(777), "разработчик с теми же правами")
+	assert.False(t, h.isTeacher(1))
+}
+
+// TestIsTeacher_DevIDUnsetDoesNotMatchZero — DevTelegramID == 0 означает
+// "не задан", а не "разрешить userID 0" (такого telegram_id не бывает, но
+// проверка на != 0 в isTeacher должна оставаться явной, а не полагаться на
+// это).
+func TestIsTeacher_DevIDUnsetDoesNotMatchZero(t *testing.T) {
+	h := makeHandler(t)
+	assert.False(t, h.isTeacher(0))
+}
+
 func TestRequireTeacher_BlocksNonTeacher(t *testing.T) {
 	h := makeHandler(t)
 	// Имитируем callback от не-преподавателя.

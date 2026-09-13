@@ -41,6 +41,7 @@ booking-bot/
 2. `/newbot` → отображаемое имя → username (должен заканчиваться на `bot`).
 3. Сохраните полученный токен как `BOT_TOKEN` в `.env`.
 4. Узнайте свой telegram_id через [@userinfobot](https://t.me/userinfobot) → сохраните как `TEACHER_TELEGRAM_ID`.
+5. (Необязательно) чтобы разработчик мог подключиться параллельно с преподавателем и видеть все действия/уведомления с теми же правами — тем же способом узнайте telegram_id разработчика и сохраните как `DEV_TELEGRAM_ID`.
 
 ### 2. Google Calendar API
 
@@ -143,7 +144,7 @@ sudo chmod 750 /opt/booking-bot/scripts/backup.sh
 - systemd-юнит c `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, ограничением `RestrictAddressFamilies`.
 - Минимальный OAuth scope: `calendar.events` (не полный календарь).
 - Rate limiter: 5 сообщений/мин на пользователя.
-- Роль преподавателя по `TEACHER_TELEGRAM_ID` из конфига — никакой БД для ролей.
+- Роль преподавателя по `TEACHER_TELEGRAM_ID` (и, если задан, `DEV_TELEGRAM_ID`) из конфига — никакой БД для ролей.
 - В логах **никогда** не пишутся `full_name` и `username` — только `user_id` и `messenger`.
 - `PRAGMA foreign_keys=ON`, `journal_mode=WAL`.
 - В CI рекомендуется gitleaks + govulncheck.

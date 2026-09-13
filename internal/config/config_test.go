@@ -58,6 +58,16 @@ func TestConfigValidate(t *testing.T) {
 		c.TeacherTelegramID = 0
 		assert.Error(t, c.Validate())
 	})
+	t.Run("dev_id не задан — валиден", func(t *testing.T) {
+		c := base
+		c.DevTelegramID = 0
+		assert.NoError(t, c.Validate())
+	})
+	t.Run("dev_id отрицательный", func(t *testing.T) {
+		c := base
+		c.DevTelegramID = -1
+		assert.Error(t, c.Validate())
+	})
 	t.Run("неизвестный уровень логов", func(t *testing.T) {
 		c := base
 		c.LogLevel = "trace"
@@ -97,6 +107,28 @@ func TestLoad_OK(t *testing.T) {
 	c, err := Load()
 	require.NoError(t, err)
 	assert.Equal(t, int64(123), c.TeacherTelegramID)
+	assert.Zero(t, c.DevTelegramID, "DEV_TELEGRAM_ID не задан в этом тесте")
 	assert.Len(t, c.ReminderIntervals, 2)
 	assert.Equal(t, 24*time.Hour, c.MaxInterval())
+}
+
+func TestLoad_DevTelegramIDOptional(t *testing.T) {
+	t.Setenv("BOT_TOKEN", "token")
+	t.Setenv("TEACHER_TELEGRAM_ID", "123")
+	t.Setenv("DEV_TELEGRAM_ID", "456")
+	t.Setenv("REMINDER_INTERVALS", "24h,2h")
+	t.Setenv("SCHEDULER_TICK", "5m")
+	t.Setenv("LOG_LEVEL", "info")
+	t.Setenv("LOG_FORMAT", "json")
+	c, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, int64(456), c.DevTelegramID)
+}
+
+func TestLoad_InvalidDevTelegramID(t *testing.T) {
+	t.Setenv("BOT_TOKEN", "token")
+	t.Setenv("TEACHER_TELEGRAM_ID", "123")
+	t.Setenv("DEV_TELEGRAM_ID", "не число")
+	_, err := Load()
+	assert.Error(t, err)
 }
