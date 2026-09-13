@@ -3,7 +3,9 @@
 //
 // Логика:
 //  1. Тик каждые SchedulerTick (по умолчанию 5 мин).
-//  2. Получаем instance события на окно [now, now + maxInterval + slack].
+//  2. Получаем instance события на окно [now, now + max(maxInterval + slack,
+//     changeDetectionHorizon)] — см. комментарий у changeDetectionHorizon,
+//     почему это НЕ то же самое окно, что для напоминаний.
 //  3. Для каждого instance:
 //     - Пропускаем cancelled.
 //     - Находим master_event_id (для повторяющихся: instance.RecurringEventId).
@@ -31,6 +33,17 @@ import (
 // matchSlack — половина "окна" совпадения (now ± slack).
 // При тике 5 мин — окно ±5 мин гарантирует, что один раз попадём в каждый интервал.
 const matchSlack = 5 * time.Minute
+
+// changeDetectionHorizon — насколько далеко вперёд планировщик обязан видеть
+// instance, чтобы отслеживать перенос/отмену занятия (detectChange), даже
+// если ближайшее напоминание для ученика настроено на совсем короткий
+// интервал (например, 5m). Раньше окно запроса к календарю было равно
+// maxInterval+slack, поэтому событие, перенесённое на время дальше этого
+// окна, просто переставало попадать в UpcomingInstances — event_state для
+// него не обновлялся, и родитель никогда не получал уведомление о переносе.
+// 14 дней — тот же горизонт, что и у команды /events (upcomingHorizon в
+// handler_teacher.go), этого достаточно для любых реалистичных переносов.
+const changeDetectionHorizon = 14 * 24 * time.Hour
 
 // Scheduler оркестрирует напоминания.
 type Scheduler struct {
@@ -94,7 +107,14 @@ func (s *Scheduler) runOnce(ctx context.Context) {
 	now := s.nowFunc()
 	maxInt := s.cfg.MaxInterval()
 	from := now
-	to := now.Add(maxInt + 10*time.Minute)
+	// Окно для detectChange должно быть широким независимо от того, какие
+	// интервалы напоминаний настроены — иначе перенос занятия дальше, чем
+	// maxInterval+slack, останется незамеченным (см. changeDetectionHorizon).
+	reminderWindow := maxInt + 10*time.Minute
+	to := now.Add(reminderWindow)
+	if changeDetectionHorizon > reminderWindow {
+		to = now.Add(changeDetectionHorizon)
+	}
 
 	log.Debug("scheduler tick", "from", from, "to", to)
 

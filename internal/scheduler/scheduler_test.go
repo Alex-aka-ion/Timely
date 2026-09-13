@@ -25,8 +25,24 @@ type fakeCalendar struct {
 func (f *fakeCalendar) UpcomingMasters(context.Context, string, time.Duration) ([]calendar.Event, error) {
 	return nil, nil
 }
-func (f *fakeCalendar) UpcomingInstances(context.Context, string, time.Time, time.Time) ([]calendar.Instance, error) {
-	return f.instances, f.err
+
+// UpcomingInstances имитирует фильтрацию Google Calendar API по
+// timeMin/timeMax (from/to): реальный календарь не возвращает instance,
+// чей Start вне запрошенного окна. Без этой фильтрации тесты не могли бы
+// заметить регрессию вида "planировщик запросил слишком узкое окно и не
+// увидел перенесённое занятие" (см. TestScheduler_NotifiesOnRescheduleFarBeyondShortReminderWindow).
+func (f *fakeCalendar) UpcomingInstances(_ context.Context, _ string, from, to time.Time) ([]calendar.Instance, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	var out []calendar.Instance
+	for _, in := range f.instances {
+		if in.Start.Before(from) || in.Start.After(to) {
+			continue
+		}
+		out = append(out, in)
+	}
+	return out, nil
 }
 func (f *fakeCalendar) UpdateSummary(context.Context, string, string, string) error {
 	return nil
@@ -247,8 +263,8 @@ func TestScheduler_WindowBoundary(t *testing.T) {
 	// Событие через 2h + 6 минут — не попадает в окно ±5 мин.
 	cal := &fakeCalendar{instances: []calendar.Instance{
 		{ID: "inst-1", MasterID: r.masterID,
-			Start: now.Add(2*time.Hour + 6*time.Minute),
-			End:   now.Add(3 * time.Hour),
+			Start:  now.Add(2*time.Hour + 6*time.Minute),
+			End:    now.Add(3 * time.Hour),
 			Status: calendar.StatusConfirmed},
 	}}
 	sc := makeScheduler(t, r, cal, now)
@@ -353,6 +369,39 @@ func TestScheduler_CancelledOnFirstSightingNoNotification(t *testing.T) {
 	sc := makeScheduler(t, r, cal, now)
 	sc.runOnce(context.Background())
 	assert.Equal(t, 0, r.sender.total())
+}
+
+// 14. Регрессия: перенос занятия ученика с коротким интервалом напоминаний
+// (например, 5m — как в тестовом .env) на время дальше старого узкого окна
+// [now, now+maxInterval+slack] всё равно должен уведомить родителя. До
+// фикса это окно совпадало с окном запроса к календарю, и такой instance
+// просто переставал возвращаться из UpcomingInstances, поэтому detectChange
+// его не видел (см. changeDetectionHorizon в scheduler.go).
+func TestScheduler_NotifiesOnRescheduleFarBeyondShortReminderWindow(t *testing.T) {
+	r := setup(t)
+	now := time.Date(2026, 4, 26, 10, 0, 0, 0, time.UTC)
+	cal := &fakeCalendar{instances: []calendar.Instance{
+		{ID: "inst-1", MasterID: r.masterID, Summary: "Занятие",
+			Start: now.Add(10 * time.Minute), End: now.Add(40 * time.Minute),
+			Status: calendar.StatusConfirmed},
+	}}
+	cfg := &config.Config{
+		ReminderIntervals: []time.Duration{5 * time.Minute}, // короткий интервал, как в тестовом .env
+		SchedulerTick:     time.Minute,
+		GoogleCalendarID:  "primary",
+	}
+	sc := New(Deps{Cfg: cfg, Store: r.store, CalClient: cal, Dispatcher: r.dispatch})
+	sc.nowFunc = func() time.Time { return now }
+
+	sc.runOnce(context.Background()) // точка отсчёта
+	require.Equal(t, 0, r.sender.total())
+
+	// Старое окно запроса было now+maxInterval(5m)+10m = now+15m — переносим
+	// занятие на 3 дня вперёд, далеко за пределы этого окна.
+	cal.instances[0].Start = now.Add(72 * time.Hour)
+	sc.runOnce(context.Background())
+	assert.Equal(t, 1, r.sender.total(),
+		"перенос далеко за пределы окна напоминаний всё равно должен уведомить")
 }
 
 func TestHumanInterval(t *testing.T) {
