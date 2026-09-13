@@ -15,6 +15,7 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	calapi "google.golang.org/api/calendar/v3"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 )
 
@@ -131,6 +132,28 @@ func (c *GoogleClient) UpcomingInstances(ctx context.Context, calendarID string,
 		})
 	}
 	return out, nil
+}
+
+// GetEvent ищет событие по ID напрямую, без временного окна — в отличие от
+// UpcomingMasters/UpcomingInstances, которым Google Calendar API отдаёт
+// результат только в границах TimeMin/TimeMax. Событие, удалённое вручную,
+// обычно отвечает 404 (или 410 Gone, если оно раньше было "мягко" удалено
+// и ещё числится tombstone'ом) — оба случая трактуем как ErrEventNotFound,
+// как и явный status=cancelled.
+func (c *GoogleClient) GetEvent(ctx context.Context, calendarID, eventID string) (Event, error) {
+	it, err := c.svc.Events.Get(calendarID, eventID).Context(ctx).Do()
+	if err != nil {
+		var gerr *googleapi.Error
+		if errors.As(err, &gerr) && (gerr.Code == http.StatusNotFound || gerr.Code == http.StatusGone) {
+			return Event{}, ErrEventNotFound
+		}
+		return Event{}, fmt.Errorf("events.get: %w", err)
+	}
+	if it.Status == StatusCancelled {
+		return Event{}, ErrEventNotFound
+	}
+	start, end, _ := parseTimes(it)
+	return Event{ID: it.Id, Summary: it.Summary, Start: start, End: end}, nil
 }
 
 // UpdateSummary обновляет название события (например, добавляет имя ученика).

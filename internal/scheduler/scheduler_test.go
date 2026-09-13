@@ -48,6 +48,12 @@ func (f *fakeCalendar) UpdateSummary(context.Context, string, string, string) er
 	return nil
 }
 
+// GetEvent планировщику не нужен (используется только карточкой ученика в
+// bot-пакете) — заглушка, чтобы удовлетворить интерфейс calendar.Client.
+func (f *fakeCalendar) GetEvent(context.Context, string, string) (calendar.Event, error) {
+	return calendar.Event{}, calendar.ErrEventNotFound
+}
+
 // fakeSender регистрирует, кому что отправлено.
 type fakeSender struct {
 	mu   sync.Mutex

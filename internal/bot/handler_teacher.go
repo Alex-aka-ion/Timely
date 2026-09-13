@@ -198,23 +198,45 @@ func formatEvent(start time.Time, summary string) string {
 	return fmt.Sprintf("%s — %s", start.Local().Format("Mon 02.01 15:04"), summary)
 }
 
-// eventLabel возвращает человекочитаемое название события для кнопки
-// "Отвязать событие". У event_students хранится только master_event_id —
-// ни время, ни название (та же причина, что в notifyContactsAboutNewEvent),
-// поэтому пытаемся найти событие свежим списком UpcomingMasters. Если
-// календарь недоступен или событие вне горизонта (например, уже в прошлом
-// либо серия закончилась) — показываем сокращённый ID, этого достаточно
-// чтобы отличить одну кнопку от другой в списке.
-func (h *Handler) eventLabel(ctx context.Context, masterEventID string) string {
-	if h.calClient != nil {
-		if events, err := h.calClient.UpcomingMasters(ctx, h.cfg.GoogleCalendarID, upcomingHorizon); err == nil {
-			for _, e := range events {
-				if e.ID == masterEventID {
-					return formatEvent(e.Start, e.Summary)
-				}
-			}
-		}
+// eventLabelOrUnlink возвращает подпись для кнопки конкретного привязанного
+// события в карточке ученика. Использует GetEvent, а не UpcomingMasters:
+// последний ограничен 14-дневным горизонтом, поэтому "не нашли событие в
+// списке" не отличить от "событие вне горизонта" — GetEvent ищет по ID
+// напрямую и, если календарь отвечает ErrEventNotFound, событие
+// действительно удалено (или отменено целиком), а не просто далеко по
+// времени.
+//
+// В этом случае отвязываем событие сразу, автоматически: показывать
+// кнопку "Отвязать" для события, которого больше нет, бессмысленно, а
+// молча оставлять висящую привязку — ровно то поведение, из-за которого
+// эта функция появилась (баг-репорт: удалённое из календаря событие
+// оставалось в списке ученика бессрочно). ok=false, если событие было
+// отвязано — вызывающий код не должен показывать под него кнопку.
+func (h *Handler) eventLabelOrUnlink(ctx context.Context, masterEventID string) (label string, ok bool) {
+	log := logger.FromContext(ctx)
+	if h.calClient == nil {
+		return eventLabelFallback(masterEventID), true
 	}
+	ev, err := h.calClient.GetEvent(ctx, h.cfg.GoogleCalendarID, masterEventID)
+	if errors.Is(err, calendar.ErrEventNotFound) {
+		if uerr := h.store.UnlinkEvent(ctx, masterEventID); uerr != nil && !errors.Is(uerr, store.ErrNotFound) {
+			log.Error("UnlinkEvent (автоочистка удалённого события)", "master_event_id", masterEventID, "error", uerr)
+		}
+		return "", false
+	}
+	if err != nil {
+		// Календарь недоступен/ошибка сети — не трогаем привязку на основании
+		// временного сбоя, показываем как есть.
+		log.Error("GetEvent", "master_event_id", masterEventID, "error", err)
+		return eventLabelFallback(masterEventID), true
+	}
+	return formatEvent(ev.Start, ev.Summary), true
+}
+
+// eventLabelFallback — подпись, когда узнать реальные время/название события
+// не удалось (календарь не подключён или временно недоступен). Сокращённого
+// ID достаточно, чтобы отличить одну кнопку от другой в списке.
+func eventLabelFallback(masterEventID string) string {
 	id := masterEventID
 	if len(id) > 12 {
 		id = id[:12] + "…"
@@ -527,20 +549,35 @@ func (h *Handler) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery
 			return
 		}
 		rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(links))
+		var autoUnlinked int
 		for _, l := range links {
+			label, ok := h.eventLabelOrUnlink(ctx, l.MasterEventID)
+			if !ok {
+				autoUnlinked++
+				continue
+			}
 			// token, а не сам event ID — та же причина, что в /events
 			// (см. eventtoken.go): ID может быть длиннее 64-байтного лимита
 			// callback_data.
 			token := h.eventTokens.tokenFor(l.MasterEventID)
 			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData(
-					"Отвязать: "+h.eventLabel(ctx, l.MasterEventID),
+					"Отвязать: "+label,
 					cbUnlinkEvent+":"+token,
 				),
 			))
 		}
+		var prefix string
+		if autoUnlinked > 0 {
+			prefix = fmt.Sprintf("Удалённых из календаря событий отвязано автоматически: %d.\n\n", autoUnlinked)
+		}
+		if len(rows) == 0 {
+			h.editText(cb.Message.Chat.ID, cb.Message.MessageID, prefix+"К ученику не привязано ни одного события.", nil)
+			h.answerCallback(cb.ID, "")
+			return
+		}
 		kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
-		h.editText(cb.Message.Chat.ID, cb.Message.MessageID, "События ученика:", &kb)
+		h.editText(cb.Message.Chat.ID, cb.Message.MessageID, prefix+"События ученика:", &kb)
 		h.answerCallback(cb.ID, "")
 
 	case cbUnlinkEvent:

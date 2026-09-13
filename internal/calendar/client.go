@@ -7,6 +7,7 @@ package calendar
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -35,6 +36,11 @@ type Instance struct {
 	Status   string
 }
 
+// ErrEventNotFound — событие с таким ID больше не существует в календаре:
+// удалено вручную, либо отменено целиком (не один instance повторяющейся
+// серии, а вся мастер-запись).
+var ErrEventNotFound = errors.New("calendar: событие не найдено")
+
 // Client — единая точка работы с Google Calendar.
 //
 // Реализации:
@@ -48,6 +54,13 @@ type Client interface {
 	// UpcomingInstances возвращает все instances событий в окне [from, to].
 	// Используется планировщиком — он развёртывает повторяющиеся события.
 	UpcomingInstances(ctx context.Context, calendarID string, from, to time.Time) ([]Instance, error)
+
+	// GetEvent возвращает мастер-событие по ID вне зависимости от времени —
+	// в отличие от UpcomingMasters/UpcomingInstances, у которых всегда есть
+	// временное окно. Нужен, чтобы отличить "событие удалено из календаря"
+	// от "просто вне горизонта показа". ErrEventNotFound, если событие
+	// удалено или отменено целиком.
+	GetEvent(ctx context.Context, calendarID, eventID string) (Event, error)
 
 	// UpdateSummary меняет название события (опционально, при привязке ученика).
 	UpdateSummary(ctx context.Context, calendarID, eventID, summary string) error

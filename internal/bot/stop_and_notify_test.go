@@ -45,6 +45,11 @@ var _ admin.UI = (*fakeAdminUI)(nil)
 // другой пакет).
 type fakeCalendarForBot struct {
 	masters []calendar.Event
+	// deleted — master_event_id, которые GetEvent должен считать удалёнными
+	// из календаря (calendar.ErrEventNotFound), даже если они присутствуют
+	// в masters — имитирует событие, которое пропало между /events и тем,
+	// как преподаватель открыл карточку ученика.
+	deleted map[string]bool
 }
 
 func (f *fakeCalendarForBot) UpcomingMasters(context.Context, string, time.Duration) ([]calendar.Event, error) {
@@ -52,6 +57,17 @@ func (f *fakeCalendarForBot) UpcomingMasters(context.Context, string, time.Durat
 }
 func (f *fakeCalendarForBot) UpcomingInstances(context.Context, string, time.Time, time.Time) ([]calendar.Instance, error) {
 	return nil, nil
+}
+func (f *fakeCalendarForBot) GetEvent(_ context.Context, _ string, eventID string) (calendar.Event, error) {
+	if f.deleted[eventID] {
+		return calendar.Event{}, calendar.ErrEventNotFound
+	}
+	for _, e := range f.masters {
+		if e.ID == eventID {
+			return e, nil
+		}
+	}
+	return calendar.Event{}, calendar.ErrEventNotFound
 }
 func (f *fakeCalendarForBot) UpdateSummary(context.Context, string, string, string) error {
 	return nil

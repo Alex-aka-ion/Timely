@@ -291,6 +291,40 @@ func TestCallback_StudentEvents_UnlinkFlow(t *testing.T) {
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }
 
+// TestCallback_StudentEvents_AutoUnlinksDeletedEvent — баг-репорт: событие,
+// удалённое из Google Calendar, оставалось привязанным к ученику навсегда
+// (UpcomingMasters, на которое раньше опирался вывод списка, ограничен
+// 14-дневным горизонтом и молча не находит событие что удалённое, что
+// просто вне окна — отличить одно от другого не может). GetEvent ищет по ID
+// напрямую, поэтому при ErrEventNotFound cbStudentEvents должен сам вызвать
+// UnlinkEvent, а не просто показать невнятную подпись.
+func TestCallback_StudentEvents_AutoUnlinksDeletedEvent(t *testing.T) {
+	h := makeHandler(t)
+	h.calClient = &fakeCalendarForBot{deleted: map[string]bool{"evt-deleted": true}}
+	ctx := context.Background()
+	s, err := h.store.CreateStudent(ctx, "Петя")
+	require.NoError(t, err)
+	require.NoError(t, h.store.LinkEvent(ctx, "evt-deleted", s.ID))
+
+	cb := &tgbotapi.CallbackQuery{
+		ID:      "cb1",
+		From:    &tgbotapi.User{ID: 999},
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: 999}, MessageID: 1},
+		Data:    cbStudentEvents + ":" + itoa(s.ID),
+	}
+	h.handleCallback(ctx, cb)
+
+	api := h.api.(*fakeTelegramAPI)
+	last := lastEdit(t, api)
+	assert.Contains(t, last.Text, "отвязано автоматически: 1")
+	assert.Contains(t, last.Text, "не привязано ни одного события")
+
+	// Привязка в store должна была реально исчезнуть, а не только пропасть
+	// из вывода.
+	_, err = h.store.GetStudentForEvent(ctx, "evt-deleted")
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}
+
 // lastEdit достаёт последнее отправленное EditMessageTextConfig — то, чем
 // editText() обновляет сообщение с inline-клавиатурой.
 func lastEdit(t *testing.T, api *fakeTelegramAPI) tgbotapi.EditMessageTextConfig {
