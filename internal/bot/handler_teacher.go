@@ -85,7 +85,7 @@ func (h *Handler) handleUnlinked(ctx context.Context, msg *tgbotapi.Message) {
 		return
 	}
 	if len(users) == 0 {
-		h.send(msg.From.ID, "Все пользователи привязаны.")
+		h.send(msg.From.ID, "У всех родителей есть ученики.")
 		return
 	}
 	var sb strings.Builder

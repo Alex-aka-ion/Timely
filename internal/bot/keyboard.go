@@ -124,7 +124,7 @@ func kbConfirm(confirmCB, cancelCB string) tgbotapi.InlineKeyboardMarkup {
 const (
 	btnStudents         = "👥 Ученики"
 	btnStudentsNew      = "➕ Новый ученик"
-	btnUnlinked         = "🔗 Не привязаны"
+	btnUnlinked         = "🔗 Родители без учеников"
 	btnUnlinkedStudents = "🧒 Ученики без родителя"
 	btnEvents           = "📅 События"
 	btnSettings         = "⚙️ Настройки"
