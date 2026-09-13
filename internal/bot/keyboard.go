@@ -121,6 +121,7 @@ const (
 	btnEvents      = "📅 События"
 	btnSettings    = "⚙️ Настройки"
 	btnMyStudents  = "👶 Мои ученики"
+	btnRename      = "✏️ Изменить имя"
 )
 
 // menuKeyboardTeacher — постоянное меню преподавателя: по кнопке на каждую
@@ -153,6 +154,9 @@ func menuKeyboardParent() tgbotapi.ReplyKeyboardMarkup {
 	kb := tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton(btnMyStudents),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(btnRename),
 		),
 	)
 	kb.ResizeKeyboard = true

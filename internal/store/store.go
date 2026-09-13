@@ -92,6 +92,10 @@ type Store interface {
 	// DeactivateAccount помечает аккаунт неактивным (мы не удаляем — для аудита).
 	DeactivateAccount(ctx context.Context, messenger, externalID string) error
 
+	// UpdateUserName меняет ФИО пользователя (например, родитель сам изменил
+	// его через /rename). ErrNotFound если пользователь не существует.
+	UpdateUserName(ctx context.Context, userID int64, fullName string) error
+
 	// GetUnlinkedUsers возвращает зарегистрированных пользователей,
 	// которые ещё не привязаны ни к одному ученику.
 	GetUnlinkedUsers(ctx context.Context) ([]User, error)

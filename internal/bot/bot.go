@@ -131,6 +131,8 @@ func (h *Handler) handleUpdate(ctx context.Context, upd tgbotapi.Update) {
 			h.handleSettings(ctx, msg)
 		case "stop":
 			h.handleStop(ctx, msg)
+		case "rename":
+			h.handleRenameStart(ctx, msg)
 		case "cancel":
 			// ВАЖНО: это единственное реальное место для /cancel. Любое
 			// сообщение вида "/слово" — это msg.IsCommand()==true, поэтому
@@ -229,8 +231,11 @@ func (h *Handler) menuAction(userID int64, text string) (func(context.Context, *
 		}
 		return nil, false
 	}
-	if text == btnMyStudents {
+	switch text {
+	case btnMyStudents:
 		return h.runMenuAction(userID, h.handleMyStudents), true
+	case btnRename:
+		return h.runMenuAction(userID, h.handleRenameStart), true
 	}
 	return nil, false
 }

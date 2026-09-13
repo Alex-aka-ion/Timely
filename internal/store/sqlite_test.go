@@ -94,6 +94,48 @@ func TestDeactivateAccount(t *testing.T) {
 	assert.Equal(t, u.ID, got.ID)
 }
 
+func TestUpdateUserName(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	u, err := s.CreateUser(ctx, "Старое Имя")
+	require.NoError(t, err)
+
+	require.NoError(t, s.UpdateUserName(ctx, u.ID, "  Новое Имя  "))
+	got, err := s.getUser(ctx, u.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Новое Имя", got.FullName, "пробелы должны обрезаться, как и в CreateUser")
+
+	// Несуществующий пользователь — ErrNotFound, а не тихий no-op.
+	err = s.UpdateUserName(ctx, 999999, "Кто-то")
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	// Пустое имя отклоняется, как и в CreateUser.
+	assert.Error(t, s.UpdateUserName(ctx, u.ID, "   "))
+}
+
+// TestUpdateUserName_ReflectsInStudentContacts — GetStudentContacts делает
+// живой JOIN на users.full_name, а не хранит отдельную копию имени, так что
+// обновление имени родителем сразу видно преподавателю без какой-либо
+// дополнительной синхронизации.
+func TestUpdateUserName_ReflectsInStudentContacts(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	u, err := s.CreateUser(ctx, "Вася Пупкин")
+	require.NoError(t, err)
+	st, err := s.CreateStudent(ctx, "Сергей")
+	require.NoError(t, err)
+	require.NoError(t, s.LinkContact(ctx, st.ID, u.ID, "Отец"))
+
+	require.NoError(t, s.UpdateUserName(ctx, u.ID, "Василий Пупкин"))
+
+	contacts, err := s.GetStudentContacts(ctx, st.ID)
+	require.NoError(t, err)
+	require.Len(t, contacts, 1)
+	assert.Equal(t, "Василий Пупкин", contacts[0].FullName)
+}
+
 func TestForeignKeysEnforced(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

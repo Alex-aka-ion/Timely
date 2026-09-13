@@ -66,6 +66,29 @@ func (h *Handler) handleParentMessage(ctx context.Context, msg *tgbotapi.Message
 	}
 
 	switch state.State {
+	case StateAwaitingNewName:
+		name := strings.TrimSpace(msg.Text)
+		if name == "" {
+			h.send(from.ID, "Имя не может быть пустым. Введите имя и фамилию, или /cancel.")
+			return
+		}
+		if len(name) > 100 {
+			name = name[:100]
+		}
+		user, err := h.store.GetUserByAccount(ctx, MessengerName, externalID(from.ID))
+		if err != nil {
+			log.Error("GetUserByAccount", "error", err)
+			h.send(from.ID, "Произошла ошибка. Попробуйте позже.")
+			return
+		}
+		if err := h.store.UpdateUserName(ctx, user.ID, name); err != nil {
+			log.Error("UpdateUserName", "user_id", user.ID, "error", err)
+			h.send(from.ID, "Не удалось сохранить. Попробуйте позже.")
+			return
+		}
+		h.dialog.ClearState(from.ID)
+		h.send(from.ID, "Имя обновлено.")
+
 	case StateAwaitingName:
 		name := strings.TrimSpace(msg.Text)
 		if name == "" {
@@ -151,6 +174,44 @@ func (h *Handler) handleStop(ctx context.Context, msg *tgbotapi.Message) {
 	if err := h.adminUI.NotifyStopRequest(ctx, user.ID, user.FullName); err != nil {
 		log.Error("уведомление преподавателя о /stop", "user_id", user.ID, "error", err)
 	}
+}
+
+// handleRenameStart — команда /rename (и кнопка меню "Изменить имя"):
+// родитель хочет изменить своё ФИО. В отличие от /start, здесь пользователь
+// уже зарегистрирован — просто просим новое имя и переходим в
+// StateAwaitingNewName (обрабатывается в handleParentMessage выше).
+//
+// Имя показывается преподавателю везде, где сейчас показывается имя
+// контакта (studentDetails и т.п.) — там оно всегда достаётся живым JOIN
+// на users (см. store.GetStudentContacts), а не хранится отдельной копией,
+// так что обновление сразу видно везде, без дополнительной синхронизации.
+func (h *Handler) handleRenameStart(ctx context.Context, msg *tgbotapi.Message) {
+	log := logger.FromContext(ctx)
+	from := msg.From
+
+	if h.isTeacher(from.ID) {
+		h.send(from.ID, "Команда /rename предназначена для родителей.")
+		return
+	}
+	if !h.rl.Allow(from.ID) {
+		return
+	}
+
+	user, err := h.store.GetUserByAccount(ctx, MessengerName, externalID(from.ID))
+	if errors.Is(err, store.ErrNotFound) {
+		h.send(from.ID, "Вы ещё не зарегистрированы. Отправьте /start.")
+		return
+	}
+	if err != nil {
+		log.Error("GetUserByAccount", "error", err)
+		h.send(from.ID, "Произошла ошибка. Попробуйте позже.")
+		return
+	}
+
+	h.dialog.Set(from.ID, StateAwaitingNewName, nil)
+	h.send(from.ID, fmt.Sprintf(
+		"Текущее имя: %s\n\nВведите новое имя и фамилию, или /cancel для отмены.",
+		user.FullName))
 }
 
 // --- "Мои ученики" (кнопка меню родителя) ------------------------------------

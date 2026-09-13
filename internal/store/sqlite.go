@@ -119,6 +119,33 @@ func (s *SQLiteStore) CreateUser(ctx context.Context, fullName string) (User, er
 	return s.getUser(ctx, id)
 }
 
+// UpdateUserName меняет ФИО существующего пользователя. В отличие от
+// CreateUser, не создаёт новую запись — только обновляет full_name у уже
+// зарегистрированного (userID приходит из GetUserByAccount, так что к
+// моменту вызова пользователь заведомо существует, но ErrNotFound на
+// RowsAffected()==0 всё равно возвращаем — на случай гонки/чужого ID).
+func (s *SQLiteStore) UpdateUserName(ctx context.Context, userID int64, fullName string) error {
+	fullName = strings.TrimSpace(fullName)
+	if fullName == "" {
+		return errors.New("full_name пуст")
+	}
+	if len(fullName) > 100 {
+		fullName = fullName[:100]
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET full_name = ? WHERE id = ?`, fullName, userID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *SQLiteStore) getUser(ctx context.Context, id int64) (User, error) {
 	var u User
 	err := s.db.QueryRowContext(ctx,
