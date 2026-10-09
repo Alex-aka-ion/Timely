@@ -51,7 +51,7 @@ func (h *Handler) handleStart(ctx context.Context, msg *tgbotapi.Message) {
 	}
 
 	h.dialog.Set(from.ID, StateAwaitingName, nil)
-	h.send(from.ID, "Здравствуйте! Введите ваше имя и фамилию для регистрации.")
+	h.send(from.ID, "Здравствуйте! Введите ваше имя и фамилию (родителя, не ребёнка) для регистрации.")
 }
 
 // handleParentMessage обрабатывает текстовое сообщение от потенциального родителя.
