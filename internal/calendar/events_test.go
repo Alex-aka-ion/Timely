@@ -234,3 +234,35 @@ func TestRunAuthFlow_RejectsServiceAccount(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "service account")
 }
+
+// TestUpcomingMasters_RecurringShowsNearestOccurrence — регрессия: у
+// повторяющегося события в списке показывалась дата начала серии, а не
+// ближайшее занятие. Три занятия одной серии + одно одиночное событие
+// должны дать две строки, причём у серии Start — ближайшее занятие.
+func TestUpcomingMasters_RecurringShowsNearestOccurrence(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Minute)
+	ev := func(id, master string, at time.Duration) *calapi.Event {
+		return &calapi.Event{
+			Id: id, RecurringEventId: master, Summary: "Занятие", Status: StatusConfirmed,
+			Start: &calapi.EventDateTime{DateTime: now.Add(at).Format(time.RFC3339)},
+			End:   &calapi.EventDateTime{DateTime: now.Add(at + time.Hour).Format(time.RFC3339)},
+		}
+	}
+	srv := fakeCalendarServer(t, []*calapi.Event{
+		ev("series_20261012", "series", 24*time.Hour),
+		ev("single", "", 30*time.Hour),
+		ev("series_20261019", "series", 7*24*time.Hour),
+		ev("series_20261026", "series", 14*24*time.Hour-time.Hour),
+	})
+	defer srv.Close()
+
+	c, err := NewGoogleClientFromHTTP(context.Background(), srv.Client(), srv.URL)
+	require.NoError(t, err)
+
+	events, err := c.UpcomingMasters(context.Background(), "primary", 14*24*time.Hour)
+	require.NoError(t, err)
+	require.Len(t, events, 2)
+	assert.Equal(t, "series", events[0].ID, "ID — мастера, по нему идёт привязка к ученику")
+	assert.True(t, events[0].Start.Equal(now.Add(24*time.Hour)), "Start — ближайшее занятие серии")
+	assert.Equal(t, "single", events[1].ID)
+}

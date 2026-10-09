@@ -105,16 +105,23 @@ func NewGoogleClientFromHTTP(ctx context.Context, hc *http.Client, baseURL strin
 	return &GoogleClient{svc: svc}, nil
 }
 
-// UpcomingMasters возвращает все мастер-события за период [now, now+horizon].
-// Не разворачивает повторяющиеся события — отдаёт только master.
+// UpcomingMasters возвращает по одному событию на каждую серию/одиночное
+// событие, у которого есть занятие в [now, now+horizon]. ID — это ID
+// мастер-события (по нему идёт привязка к ученику), а Start/End — ближайшего
+// занятия внутри окна.
+//
+// Запрашиваем развёрнутые instance (SingleEvents=true) и сворачиваем по
+// мастеру, а не берём сами master-записи: у master Start — это дата начала
+// СЕРИИ (может быть месяцы назад), и именно её бот показывал в списке
+// вместо реальной даты занятия.
 func (c *GoogleClient) UpcomingMasters(ctx context.Context, calendarID string, horizon time.Duration) ([]Event, error) {
 	now := time.Now().UTC()
 	end := now.Add(horizon)
-	// Не используем OrderBy("startTime") — он несовместим с SingleEvents=false.
 	resp, err := c.svc.Events.List(calendarID).
 		Context(ctx).
 		ShowDeleted(false).
-		SingleEvents(false). // нужны master-events
+		SingleEvents(true).
+		OrderBy("startTime").
 		TimeMin(now.Format(time.RFC3339)).
 		TimeMax(end.Format(time.RFC3339)).
 		MaxResults(250).
@@ -123,6 +130,7 @@ func (c *GoogleClient) UpcomingMasters(ctx context.Context, calendarID string, h
 		return nil, fmt.Errorf("events.list: %w", err)
 	}
 	out := make([]Event, 0, len(resp.Items))
+	seen := make(map[string]bool, len(resp.Items))
 	for _, it := range resp.Items {
 		if it.Status == StatusCancelled {
 			continue
@@ -131,8 +139,16 @@ func (c *GoogleClient) UpcomingMasters(ctx context.Context, calendarID string, h
 		if !ok {
 			continue
 		}
+		master := it.RecurringEventId
+		if master == "" {
+			master = it.Id
+		}
+		if seen[master] {
+			continue // список упорядочен по времени — первое вхождение и есть ближайшее
+		}
+		seen[master] = true
 		out = append(out, Event{
-			ID:      it.Id,
+			ID:      master,
 			Summary: it.Summary,
 			Start:   start,
 			End:     end,

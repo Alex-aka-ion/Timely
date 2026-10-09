@@ -17,7 +17,8 @@ const (
 	StatusCancelled = "cancelled"
 )
 
-// Event — одно мастер-событие из Google Calendar.
+// Event — мастер-событие из Google Calendar. Start/End у результата
+// UpcomingMasters — ближайшее занятие в окне, а не начало серии.
 type Event struct {
 	ID      string // master event id
 	Summary string
