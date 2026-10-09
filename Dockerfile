@@ -37,15 +37,15 @@ RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o /out/booking-bot ./cmd
 # с той, на которой бинарник слинкован в стадии сборки.
 FROM debian:bullseye-slim
 
-# ca-certificates — без них TLS-запросы к api.telegram.org и
-# www.googleapis.com не пройдут проверку сертификата.
-# tzdata — база часовых поясов для TZ (см. docker-compose.yml/.env):
-# планировщик форматирует время занятий через time.Local, без tzdata любой
-# TZ, кроме UTC, был бы недоступен.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates \
-        tzdata \
-    && rm -rf /var/lib/apt/lists/*
+# Никакого apt-get в рантайме: Debian 11 (bullseye) вышел из поддержки, и
+# его security-репозиторий отдаёт 404 — сборка с `apt-get install` падала.
+# - CA-сертификаты (без них TLS к api.telegram.org и www.googleapis.com не
+#   пройдёт проверку) копируем готовым бандлом из стадии сборки — там они
+#   уже есть, иначе `go mod download` выше не отработал бы.
+# - База часовых поясов для TZ (планировщик форматирует время занятий через
+#   time.Local) встроена прямо в бинарник — import _ "time/tzdata" в
+#   cmd/main.go, поэтому пакет tzdata в образе не нужен.
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 # Системный пользователь без shell и домашней директории — тот же принцип,
 # что и в deploy/booking-bot.service для systemd-варианта деплоя.

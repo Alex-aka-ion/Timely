@@ -19,6 +19,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	_ "time/tzdata" // база часовых поясов внутри бинарника: TZ работает и без tzdata в образе
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
