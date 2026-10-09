@@ -137,6 +137,7 @@ const (
 	btnUnlinkedStudents = "🧒 Ученики без родителя"
 	btnEvents           = "📅 События"
 	btnSettings         = "⚙️ Настройки"
+	btnNotifications    = "📨 Уведомления"
 	btnMyStudents       = "👶 Мои ученики"
 	btnRename           = "✏️ Изменить имя"
 )
@@ -157,6 +158,9 @@ func menuKeyboardTeacher() tgbotapi.ReplyKeyboardMarkup {
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton(btnEvents),
 			tgbotapi.NewKeyboardButton(btnSettings),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(btnNotifications),
 		),
 	)
 	// ResizeKeyboard — компактная высота кнопок вместо "во весь экран"

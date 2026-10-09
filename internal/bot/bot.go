@@ -142,6 +142,8 @@ func (h *Handler) handleUpdate(ctx context.Context, upd tgbotapi.Update) {
 			h.handleStop(ctx, msg)
 		case "rename":
 			h.handleRenameStart(ctx, msg)
+		case "notifications":
+			h.handleNotifications(ctx, msg)
 		case "log":
 			// Служебная команда для разработчика/преподавателя — намеренно
 			// без кнопки в постоянном меню (см. menuKeyboardTeacher).
@@ -249,6 +251,8 @@ func (h *Handler) menuAction(userID int64, text string) (func(context.Context, *
 			return h.runMenuAction(userID, h.handleEvents), true
 		case btnSettings:
 			return h.runMenuAction(userID, h.handleSettings), true
+		case btnNotifications:
+			return h.runMenuAction(userID, h.handleNotifications), true
 		}
 		return nil, false
 	}

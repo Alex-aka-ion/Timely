@@ -397,3 +397,36 @@ func TestGetStudentsByContact(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, got)
 }
+
+func TestNotificationLog(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	u, _ := s.CreateUser(ctx, "Анна Иванова")
+
+	require.NoError(t, s.LogNotification(ctx, u.ID, "первое", true))
+	require.NoError(t, s.LogNotification(ctx, u.ID, "второе", false))
+
+	got, err := s.GetRecentNotifications(ctx, 50)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, "второе", got[0].Text, "новые сверху")
+	assert.False(t, got[0].Delivered)
+	assert.Equal(t, "Анна Иванова", got[0].FullName, "реальное имя получателя")
+	assert.True(t, got[1].Delivered)
+
+	one, err := s.GetRecentNotifications(ctx, 1)
+	require.NoError(t, err)
+	assert.Len(t, one, 1)
+}
+
+func TestNotificationLog_TrimsOldEntries(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	u, _ := s.CreateUser(ctx, "Анна")
+	for i := 0; i < notificationLogKeep+20; i++ {
+		require.NoError(t, s.LogNotification(ctx, u.ID, "n", true))
+	}
+	got, err := s.GetRecentNotifications(ctx, notificationLogKeep*2)
+	require.NoError(t, err)
+	assert.Len(t, got, notificationLogKeep)
+}

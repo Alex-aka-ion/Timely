@@ -37,6 +37,18 @@ type fakeStore struct {
 	store.Store
 	accounts []store.MessengerAccount
 	err      error
+	logged   []loggedNotification
+}
+
+type loggedNotification struct {
+	userID    int64
+	text      string
+	delivered bool
+}
+
+func (f *fakeStore) LogNotification(_ context.Context, userID int64, text string, delivered bool) error {
+	f.logged = append(f.logged, loggedNotification{userID, text, delivered})
+	return nil
 }
 
 func (f *fakeStore) GetActiveAccounts(_ context.Context, _ int64) ([]store.MessengerAccount, error) {
@@ -132,4 +144,20 @@ func TestDispatcher_ContextRespected(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	require.NoError(t, d.SendToUser(ctx, 7, "hi"))
+}
+
+// Каждая отправка попадает в журнал уведомлений — и удачная, и нет.
+func TestDispatcher_LogsDeliveredAndFailed(t *testing.T) {
+	ok := &fakeSender{name: "telegram"}
+	st := &fakeStore{accounts: []store.MessengerAccount{{Messenger: "telegram", ExternalID: "tg-1"}}}
+	d := NewDispatcher(st, ok)
+	require.NoError(t, d.SendToUser(context.Background(), 7, "привет"))
+
+	bad := &fakeSender{name: "telegram", err: errors.New("network")}
+	d = NewDispatcher(st, bad)
+	require.Error(t, d.SendToUser(context.Background(), 8, "не дойдёт"))
+
+	require.Len(t, st.logged, 2)
+	assert.Equal(t, loggedNotification{7, "привет", true}, st.logged[0])
+	assert.Equal(t, loggedNotification{8, "не дойдёт", false}, st.logged[1])
 }

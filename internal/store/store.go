@@ -67,6 +67,16 @@ type EventState struct {
 	NotifiedCancelled bool
 }
 
+// SentNotification — запись журнала уведомлений родителям (с именем
+// получателя — журнал показывает преподаватель, а не пишется в логи).
+type SentNotification struct {
+	UserID    int64
+	FullName  string
+	Text      string
+	Delivered bool
+	CreatedAt time.Time
+}
+
 // Store — единая точка доступа к хранилищу.
 //
 // Все операции принимают context для возможности отмены / таймаутов.
@@ -185,6 +195,16 @@ type Store interface {
 	// MarkEventCancelled помечает instance уведомлённым об отмене, чтобы не
 	// слать повторное уведомление на каждом следующем тике планировщика.
 	MarkEventCancelled(ctx context.Context, instanceEventID string) error
+
+	// notification log -----------------------------------------------------
+
+	// LogNotification пишет в журнал уведомление родителю и обрезает журнал
+	// до последних notificationLogKeep записей.
+	LogNotification(ctx context.Context, userID int64, text string, delivered bool) error
+
+	// GetRecentNotifications возвращает последние limit записей журнала,
+	// от новых к старым, с именами получателей.
+	GetRecentNotifications(ctx context.Context, limit int) ([]SentNotification, error)
 
 	// settings -------------------------------------------------------------
 

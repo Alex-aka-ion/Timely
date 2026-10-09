@@ -292,6 +292,69 @@ func (h *Handler) handleSettings(ctx context.Context, msg *tgbotapi.Message) {
 		val))
 }
 
+// --- /notifications ------------------------------------------------------
+
+// notificationsShown — сколько последних уведомлений показываем.
+const notificationsShown = 50
+
+// handleNotifications показывает преподавателю последние уведомления
+// родителям — с реальными именами получателей и пометкой, дошло ли
+// сообщение. Источник — журнал в БД (Dispatcher пишет в него каждую
+// отправку), поэтому история переживает перезапуск, в отличие от /log.
+// Список длиннее лимита Telegram на одно сообщение, поэтому уходит
+// несколькими сообщениями, от новых к старым.
+func (h *Handler) handleNotifications(ctx context.Context, msg *tgbotapi.Message) {
+	if !h.requireTeacher(msg.From.ID) {
+		return
+	}
+	items, err := h.store.GetRecentNotifications(ctx, notificationsShown)
+	if err != nil {
+		logger.FromContext(ctx).Error("GetRecentNotifications", "error", err)
+		h.send(msg.From.ID, "Ошибка.")
+		return
+	}
+	if len(items) == 0 {
+		h.send(msg.From.ID, "Уведомлений родителям пока не отправлялось.")
+		return
+	}
+	lines := make([]string, 0, len(items))
+	for _, n := range items {
+		mark := "✓"
+		if !n.Delivered {
+			mark = "✗ не доставлено"
+		}
+		// Текст уведомления многострочный — в списке сворачиваем в одну строку.
+		text := strings.Join(strings.Fields(n.Text), " ")
+		lines = append(lines, fmt.Sprintf("%s %s %s\n%s",
+			n.CreatedAt.Local().Format("02.01 15:04"), mark, n.FullName, text))
+	}
+	h.send(msg.From.ID, fmt.Sprintf("Последние уведомления родителям (%d), новые сверху:", len(lines)))
+	for _, chunk := range chunkLines(lines, 3800) {
+		h.send(msg.From.ID, chunk)
+	}
+}
+
+// chunkLines склеивает записи через пустую строку в сообщения не длиннее
+// limit байт, не разрывая запись посередине.
+func chunkLines(lines []string, limit int) []string {
+	var out []string
+	var cur strings.Builder
+	for _, l := range lines {
+		if cur.Len() > 0 && cur.Len()+len(l)+2 > limit {
+			out = append(out, cur.String())
+			cur.Reset()
+		}
+		if cur.Len() > 0 {
+			cur.WriteString("\n\n")
+		}
+		cur.WriteString(l)
+	}
+	if cur.Len() > 0 {
+		out = append(out, cur.String())
+	}
+	return out
+}
+
 // --- /log ---------------------------------------------------------------
 
 // logTailLimit — с запасом от 4096-символьного лимита Telegram на текст

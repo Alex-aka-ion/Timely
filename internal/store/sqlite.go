@@ -569,6 +569,54 @@ func (s *SQLiteStore) ClearRemindersForInstance(ctx context.Context, instanceEve
 	return err
 }
 
+// --- notification log -------------------------------------------------------
+
+// notificationLogKeep — сколько последних записей журнала держим в БД:
+// преподавателю нужны последние 50, остальное — запас, а не архив.
+const notificationLogKeep = 500
+
+func (s *SQLiteStore) LogNotification(ctx context.Context, userID int64, text string, delivered bool) error {
+	d := 0
+	if delivered {
+		d = 1
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO notification_log (user_id, text, delivered) VALUES (?, ?, ?)`,
+		userID, text, d); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM notification_log
+		WHERE id <= (SELECT id FROM notification_log ORDER BY id DESC LIMIT 1 OFFSET ?)
+	`, notificationLogKeep)
+	return err
+}
+
+func (s *SQLiteStore) GetRecentNotifications(ctx context.Context, limit int) ([]SentNotification, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT n.user_id, u.full_name, n.text, n.delivered, n.created_at
+		FROM notification_log n
+		JOIN users u ON u.id = n.user_id
+		ORDER BY n.id DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SentNotification
+	for rows.Next() {
+		var n SentNotification
+		var delivered int
+		if err := rows.Scan(&n.UserID, &n.FullName, &n.Text, &delivered, &n.CreatedAt); err != nil {
+			return nil, err
+		}
+		n.Delivered = delivered != 0
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
 // --- event state (для уведомлений об изменениях) ----------------------------
 
 func (s *SQLiteStore) GetEventState(ctx context.Context, instanceEventID string) (EventState, error) {

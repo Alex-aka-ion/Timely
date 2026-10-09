@@ -60,7 +60,19 @@ func (d *Dispatcher) Register(s Sender) {
 // не имеет активных аккаунтов. Если хоть один доставил — успех.
 //
 // Логирует предупреждение если для мессенджера нет зарегистрированного Sender.
+//
+// Каждая попытка (и успешная, и нет) записывается в журнал уведомлений —
+// его показывает преподавателю команда /notifications в боте.
 func (d *Dispatcher) SendToUser(ctx context.Context, userID int64, text string) error {
+	err := d.send(ctx, userID, text)
+	// Журнал — best-effort: его сбой не должен влиять на доставку.
+	if lerr := d.store.LogNotification(ctx, userID, text, err == nil); lerr != nil {
+		logger.FromContext(ctx).Error("запись в журнал уведомлений", "user_id", userID, "error", lerr)
+	}
+	return err
+}
+
+func (d *Dispatcher) send(ctx context.Context, userID int64, text string) error {
 	log := logger.FromContext(ctx)
 
 	accounts, err := d.store.GetActiveAccounts(ctx, userID)
