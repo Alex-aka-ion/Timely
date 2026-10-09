@@ -215,10 +215,16 @@ func formatEvent(start time.Time, summary string) string {
 // эта функция появилась (баг-репорт: удалённое из календаря событие
 // оставалось в списке ученика бессрочно). ok=false, если событие было
 // отвязано — вызывающий код не должен показывать под него кнопку.
-func (h *Handler) eventLabelOrUnlink(ctx context.Context, masterEventID string) (label string, ok bool) {
+func (h *Handler) eventLabelOrUnlink(ctx context.Context, masterEventID string, nearest map[string]calendar.Event) (label string, ok bool) {
 	log := logger.FromContext(ctx)
 	if h.calClient == nil {
 		return eventLabelFallback(masterEventID), true
+	}
+	// Ближайшее занятие в окне — самый полезный вариант подписи. GetEvent
+	// отдаёт Start самой серии (дату её начала), поэтому используем его
+	// только как проверку "событие ещё существует" и источник названия.
+	if ev, found := nearest[masterEventID]; found {
+		return formatEvent(ev.Start, ev.Summary), true
 	}
 	ev, err := h.calClient.GetEvent(ctx, h.cfg.GoogleCalendarID, masterEventID)
 	if errors.Is(err, calendar.ErrEventNotFound) {
@@ -233,7 +239,27 @@ func (h *Handler) eventLabelOrUnlink(ctx context.Context, masterEventID string) 
 		log.Error("GetEvent", "master_event_id", masterEventID, "error", err)
 		return eventLabelFallback(masterEventID), true
 	}
-	return formatEvent(ev.Start, ev.Summary), true
+	return fmt.Sprintf("%s (в ближайшие %d дн. занятий нет)", ev.Summary, int(upcomingHorizon/(24*time.Hour))), true
+}
+
+// nearestOccurrences — ближайшие занятия всех событий календаря в окне
+// upcomingHorizon, по ID мастера. Один запрос на все подписи сразу, а не
+// по запросу на событие. При недоступном календаре — nil: подписи тогда
+// строятся через GetEvent/fallback.
+func (h *Handler) nearestOccurrences(ctx context.Context) map[string]calendar.Event {
+	if h.calClient == nil {
+		return nil
+	}
+	events, err := h.calClient.UpcomingMasters(ctx, h.cfg.GoogleCalendarID, upcomingHorizon)
+	if err != nil {
+		logger.FromContext(ctx).Error("UpcomingMasters (подписи событий)", "error", err)
+		return nil
+	}
+	m := make(map[string]calendar.Event, len(events))
+	for _, e := range events {
+		m[e.ID] = e
+	}
+	return m
 }
 
 // eventLabelFallback — подпись, когда узнать реальные время/название события
@@ -687,8 +713,9 @@ func (h *Handler) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery
 		}
 		rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(links))
 		var autoUnlinked int
+		nearest := h.nearestOccurrences(ctx)
 		for _, l := range links {
-			label, ok := h.eventLabelOrUnlink(ctx, l.MasterEventID)
+			label, ok := h.eventLabelOrUnlink(ctx, l.MasterEventID, nearest)
 			if !ok {
 				autoUnlinked++
 				continue
@@ -907,6 +934,27 @@ func (h *Handler) studentDetails(ctx context.Context, studentID int64) (string, 
 	}
 	for _, c := range contacts {
 		fmt.Fprintf(&sb, "  • %s (%s)\n", c.FullName, c.Label)
+	}
+
+	sb.WriteString("События:\n")
+	links, err := h.store.GetStudentEvents(ctx, studentID)
+	if err != nil {
+		return "", tgbotapi.InlineKeyboardMarkup{}, err
+	}
+	nearest := h.nearestOccurrences(ctx)
+	shown := 0
+	for _, l := range links {
+		// Удалённые из календаря события тут же отвязываются (см.
+		// eventLabelOrUnlink) и в списке не показываются.
+		label, ok := h.eventLabelOrUnlink(ctx, l.MasterEventID, nearest)
+		if !ok {
+			continue
+		}
+		fmt.Fprintf(&sb, "  • %s\n", label)
+		shown++
+	}
+	if shown == 0 {
+		sb.WriteString("  (нет)\n")
 	}
 	return sb.String(), kbStudentMenu(studentID), nil
 }

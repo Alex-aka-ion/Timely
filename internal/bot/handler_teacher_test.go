@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/booking-bot/booking-bot/internal/admin"
+	"github.com/booking-bot/booking-bot/internal/calendar"
 	"github.com/booking-bot/booking-bot/internal/config"
 	"github.com/booking-bot/booking-bot/internal/store"
 )
@@ -582,4 +583,40 @@ func TestParseCallback_OK(t *testing.T) {
 func TestParseCallback_NonNumeric(t *testing.T) {
 	_, _, ok := parseCallback("foo:abc")
 	assert.False(t, ok)
+}
+
+// --- события в карточке ученика -------------------------------------------
+
+func TestStudentDetails_ShowsLinkedEvents(t *testing.T) {
+	h := makeHandler(t)
+	h.calClient = &fakeCalendarForBot{
+		masters: []calendar.Event{{ID: "evt-1", Summary: "Логопед Петя", Start: time.Date(2026, 10, 12, 10, 0, 0, 0, time.UTC)}},
+		deleted: map[string]bool{"evt-gone": true},
+	}
+	ctx := context.Background()
+	s, err := h.store.CreateStudent(ctx, "Петя")
+	require.NoError(t, err)
+	require.NoError(t, h.store.LinkEvent(ctx, "evt-1", s.ID))
+	require.NoError(t, h.store.LinkEvent(ctx, "evt-gone", s.ID))
+
+	text, _, err := h.studentDetails(ctx, s.ID)
+	require.NoError(t, err)
+	assert.Contains(t, text, "События:")
+	assert.Contains(t, text, "Логопед Петя")
+	assert.NotContains(t, text, "evt-gone", "удалённое из календаря событие не показываем")
+
+	// ...и заодно отвязано, как в списке "Отвязать событие".
+	_, err = h.store.GetStudentForEvent(ctx, "evt-gone")
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestStudentDetails_NoEvents(t *testing.T) {
+	h := makeHandler(t)
+	ctx := context.Background()
+	s, err := h.store.CreateStudent(ctx, "Петя")
+	require.NoError(t, err)
+
+	text, _, err := h.studentDetails(ctx, s.ID)
+	require.NoError(t, err)
+	assert.Contains(t, text, "События:\n  (нет)")
 }
