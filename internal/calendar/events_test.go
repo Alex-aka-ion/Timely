@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -193,4 +194,43 @@ func TestParseTimes_Timed(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC), s)
 	assert.Equal(t, time.Date(2026, 1, 1, 11, 0, 0, 0, time.UTC), en)
+}
+
+const fakeServiceAccountJSON = `{
+  "type": "service_account",
+  "project_id": "p",
+  "private_key_id": "k",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----\n",
+  "client_email": "bot@p.iam.gserviceaccount.com",
+  "client_id": "1",
+  "token_uri": "https://oauth2.googleapis.com/token"
+}`
+
+func TestIsServiceAccountJSON(t *testing.T) {
+	assert.True(t, isServiceAccountJSON([]byte(fakeServiceAccountJSON)))
+	assert.False(t, isServiceAccountJSON([]byte(`{"installed":{"client_id":"x"}}`)))
+	assert.False(t, isServiceAccountJSON([]byte(`не json`)))
+}
+
+// Ключ service account не требует token.json: клиент должен создаваться
+// даже с несуществующим tokenPath.
+func TestNewGoogleClient_ServiceAccountNeedsNoToken(t *testing.T) {
+	dir := t.TempDir()
+	credPath := dir + "/sa.json"
+	require.NoError(t, os.WriteFile(credPath, []byte(fakeServiceAccountJSON), 0o600))
+
+	assert.True(t, IsServiceAccountFile(credPath))
+	c, err := NewGoogleClient(context.Background(), credPath, dir+"/нет-такого-token.json")
+	require.NoError(t, err)
+	assert.NotNil(t, c)
+}
+
+func TestRunAuthFlow_RejectsServiceAccount(t *testing.T) {
+	dir := t.TempDir()
+	credPath := dir + "/sa.json"
+	require.NoError(t, os.WriteFile(credPath, []byte(fakeServiceAccountJSON), 0o600))
+
+	err := RunAuthFlow(context.Background(), credPath, dir+"/token.json")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "service account")
 }

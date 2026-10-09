@@ -45,16 +45,27 @@ booking-bot/
 
 ### 2. Google Calendar API
 
+**Рекомендуется: service account.** Нет consent screen, публикации и верификации, `token.json` не нужен и не протухает (у OAuth-клиента в статусе Testing refresh-токен живёт всего 7 дней).
+
 1. https://console.cloud.google.com → создать проект.
 2. APIs & Services → Library → включить **Google Calendar API**.
-3. Credentials → Create Credentials → OAuth 2.0 Client ID → тип **Desktop App**.
-4. Скачать `credentials.json` в корень проекта.
-5. OAuth consent screen → добавить свой Google-аккаунт в Test users.
-6. Первичная авторизация:
+3. IAM & Admin → Service Accounts → Create service account (роли не нужны) → вкладка Keys → Add key → JSON. Скачанный файл сохранить как `credentials.json` в корень проекта.
+4. Преподаватель: Google Calendar → настройки нужного календаря → «Предоставить доступ определённым пользователям» → email service account'а (`...@...iam.gserviceaccount.com`) с правом «Вносить изменения в мероприятия».
+5. В `.env`: `GOOGLE_CALENDAR_ID` — email или ID этого календаря (Настройки календаря → «Интеграция календаря» → «Идентификатор календаря»). Значение `primary` у service account — его собственный пустой календарь, при старте бот предупредит об этом в логе.
+
+Команда `--auth` и `token.json` в этом режиме не используются.
+
+**Запасной вариант: OAuth-клиент.**
+
+1. Credentials → Create Credentials → OAuth 2.0 Client ID → тип **Desktop App**, скачать как `credentials.json`.
+2. OAuth consent screen → добавить аккаунт преподавателя в Test users (и опубликовать приложение, иначе токен протухнет через 7 дней).
+3. Первичная авторизация под аккаунтом преподавателя:
    ```bash
    ./booking-bot --auth
    ```
-   Перейдите по ссылке, разрешите доступ, вставьте код в терминал. `token.json` сохранится автоматически.
+   Перейдите по ссылке, разрешите доступ. `token.json` сохранится автоматически; в Docker его нужно смонтировать в `docker-compose.yml` (см. комментарий там).
+
+Тип файла бот определяет сам по полю `type` внутри `credentials.json`.
 
 ### 3. .env
 

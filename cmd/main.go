@@ -107,6 +107,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// У service account "primary" — его собственный пустой календарь, а не
+	// календарь преподавателя: без явного GOOGLE_CALENDAR_ID бот молча
+	// увидит ноль событий.
+	if calendar.IsServiceAccountFile(cfg.GoogleCredentialsPath) && cfg.GoogleCalendarID == "primary" {
+		log.Warn("GOOGLE_CALENDAR_ID=primary при service account — это пустой календарь самого service account; укажите email/ID календаря преподавателя")
+	}
+
 	// Sender + Dispatcher.
 	tgSender := bot.NewTelegramSender(tgAPI)
 	dispatcher := notify.NewDispatcher(st, tgSender)

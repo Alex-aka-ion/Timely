@@ -29,10 +29,36 @@ type GoogleClient struct {
 
 var _ Client = (*GoogleClient)(nil)
 
-// NewGoogleClient читает credentials.json и token.json из путей и
-// создаёт авторизованного клиента. Если token.json не существует или
-// устарел — вернёт ошибку. Используйте RunAuthFlow для первичной авторизации.
+// NewGoogleClient создаёт авторизованного клиента по файлу credentials.
+//
+// Файл может быть двух видов (определяется по полю "type" внутри JSON):
+//   - ключ service account ("type": "service_account") — рекомендуемый
+//     вариант для сервера: нет consent screen, нет token.json и нет
+//     протухания токена. tokenPath в этом случае не используется;
+//     преподаватель один раз открывает доступ к своему календарю на
+//     email service account'а, а GOOGLE_CALENDAR_ID указывает на этот
+//     календарь ("primary" у service account — его собственный пустой
+//     календарь, а не календарь преподавателя);
+//   - OAuth-клиент (credentials.json "Desktop app") + token.json из
+//     RunAuthFlow. Если token.json не существует или устарел — вернёт
+//     ошибку, используйте RunAuthFlow.
 func NewGoogleClient(ctx context.Context, credentialsPath, tokenPath string) (*GoogleClient, error) {
+	b, err := os.ReadFile(credentialsPath)
+	if err != nil {
+		return nil, fmt.Errorf("чтение credentials: %w", err)
+	}
+	if isServiceAccountJSON(b) {
+		creds, err := google.CredentialsFromJSON(ctx, b, scope)
+		if err != nil {
+			return nil, fmt.Errorf("парсинг ключа service account: %w", err)
+		}
+		svc, err := calapi.NewService(ctx, option.WithTokenSource(creds.TokenSource))
+		if err != nil {
+			return nil, fmt.Errorf("calendar service: %w", err)
+		}
+		return &GoogleClient{svc: svc}, nil
+	}
+
 	cfg, err := loadOAuthConfig(credentialsPath)
 	if err != nil {
 		return nil, err
@@ -47,6 +73,23 @@ func NewGoogleClient(ctx context.Context, credentialsPath, tokenPath string) (*G
 		return nil, fmt.Errorf("calendar service: %w", err)
 	}
 	return &GoogleClient{svc: svc}, nil
+}
+
+// isServiceAccountJSON отличает ключ service account от OAuth-клиента:
+// у первого в JSON есть "type": "service_account", у второго — только
+// ключ "installed"/"web".
+func isServiceAccountJSON(b []byte) bool {
+	var probe struct {
+		Type string `json:"type"`
+	}
+	return json.Unmarshal(b, &probe) == nil && probe.Type == "service_account"
+}
+
+// IsServiceAccountFile — true, если по пути лежит ключ service account.
+// Нужен вызывающему коду, чтобы предупредить о GOOGLE_CALENDAR_ID=primary.
+func IsServiceAccountFile(path string) bool {
+	b, err := os.ReadFile(path)
+	return err == nil && isServiceAccountJSON(b)
 }
 
 // NewGoogleClientFromHTTP — для тестов с httptest.Server: подаёт готовый http.Client.
@@ -237,6 +280,9 @@ func SaveToken(path string, t *oauth2.Token) error {
 //
 // Использование: ./booking-bot --auth
 func RunAuthFlow(ctx context.Context, credentialsPath, tokenPath string) error {
+	if IsServiceAccountFile(credentialsPath) {
+		return errors.New("credentials — ключ service account, OAuth-авторизация (--auth) ему не нужна")
+	}
 	cfg, err := loadOAuthConfig(credentialsPath)
 	if err != nil {
 		return err

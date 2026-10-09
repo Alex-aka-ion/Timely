@@ -25,12 +25,13 @@ services:
       # от хостового root, и процесс внутри контейнера (не root) не
       # сможет в него писать.
       - ./data:/app/data
-      # credentials.json/token.json получены один раз через
-      # `./booking-bot --auth` (см. README) — на сервере эту команду не
-      # запускают: OAuth loopback-flow открывает браузер, на headless VDS
-      # его нет. Оба файла read-only — от компрометации внутри контейнера
-      # это не спасёт учётку целиком, но случайную перезапись — да.
+      # credentials.json — ключ service account (см. README, раздел "Google
+      # Calendar API"): token.json и `--auth` ему не нужны, поэтому файл
+      # token.json здесь не монтируется — иначе при его отсутствии Docker
+      # сам создал бы на его месте пустую директорию. Если вы остаётесь на
+      # OAuth-клиенте (Desktop app), добавьте строку
+      #   - ./token.json:/app/token.json:ro
+      # и положите token.json рядом (получается локально через `--auth`).
       - ./credentials.json:/app/credentials.json:ro
-      - ./token.json:/app/token.json:ro
     # Ни один порт не публикуется — бот не принимает входящих запросов
     # (см. Dockerfile).
