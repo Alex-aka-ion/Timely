@@ -175,7 +175,7 @@ func (s *Scheduler) processInstance(ctx context.Context, now time.Time, in calen
 			continue
 		}
 		reminderType := interval.String()
-		text := buildText(student.DisplayName, in.Summary, interval, in.Start)
+		text := buildText(student.DisplayName, interval, in.Start)
 
 		for _, c := range contacts {
 			already, err := s.store.ReminderSent(ctx, in.ID, c.UserID, reminderType)
@@ -219,10 +219,13 @@ func (s *Scheduler) intervalsFor(ctx context.Context, st store.Student) ([]time.
 }
 
 // buildText формирует текст напоминания.
-func buildText(student, summary string, interval time.Duration, start time.Time) string {
+//
+// Название события из календаря родителю не отправляется — оно заполняется
+// преподавателем для себя, родителю достаточно имени ученика и времени.
+func buildText(student string, interval time.Duration, start time.Time) string {
 	return fmt.Sprintf(
-		"Напоминание: занятие у ученика %s\nСобытие: %s\nЧерез %s (%s)",
-		student, summary, humanInterval(interval), formatWhen(start),
+		"Напоминание: занятие у ученика %s\nЧерез %s (%s)",
+		student, humanInterval(interval), formatWhen(start),
 	)
 }
 

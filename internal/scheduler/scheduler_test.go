@@ -421,3 +421,12 @@ func TestHumanInterval(t *testing.T) {
 		assert.Equal(t, want, humanInterval(d))
 	}
 }
+
+// Название события из календаря в напоминание не попадает — родителю
+// достаточно имени ученика и времени.
+func TestBuildText_NoEventTitle(t *testing.T) {
+	text := buildText("Петя", 24*time.Hour, time.Date(2026, 10, 12, 10, 0, 0, 0, time.UTC))
+	assert.Contains(t, text, "занятие у ученика Петя")
+	assert.Contains(t, text, "Через 1 дн")
+	assert.NotContains(t, text, "Событие")
+}
