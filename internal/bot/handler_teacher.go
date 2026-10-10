@@ -323,10 +323,17 @@ func (h *Handler) handleNotifications(ctx context.Context, msg *tgbotapi.Message
 		if !n.Delivered {
 			mark = "✗ не доставлено"
 		}
-		// Текст уведомления многострочный — в списке сворачиваем в одну строку.
-		text := strings.Join(strings.Fields(n.Text), " ")
-		lines = append(lines, fmt.Sprintf("%s %s %s\n%s",
-			n.CreatedAt.Local().Format("02.01 15:04"), mark, n.FullName, text))
+		// Строки текста уведомления оставляем отдельными строками с отступом
+		// под заголовком записи — иначе в одну строку склеиваются имя
+		// ученика и название события из календаря ("у ученика Петя Занятие").
+		var body strings.Builder
+		for _, l := range strings.Split(n.Text, "\n") {
+			if l = strings.TrimSpace(l); l != "" {
+				body.WriteString("\n    " + l)
+			}
+		}
+		lines = append(lines, fmt.Sprintf("%s %s %s%s",
+			n.CreatedAt.Local().Format("02.01 15:04"), mark, n.FullName, body.String()))
 	}
 	h.send(msg.From.ID, fmt.Sprintf("Последние уведомления родителям (%d), новые сверху:", len(lines)))
 	for _, chunk := range chunkLines(lines, 3800) {

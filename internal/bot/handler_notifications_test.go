@@ -31,16 +31,17 @@ func TestHandleNotifications_ShowsRealNamesAndStatus(t *testing.T) {
 	ctx := context.Background()
 	u, err := h.store.CreateUser(ctx, "Анна Иванова")
 	require.NoError(t, err)
-	require.NoError(t, h.store.LogNotification(ctx, u.ID, "Занятие у Пети\nназначено", true))
+	require.NoError(t, h.store.LogNotification(ctx, u.ID, "Напоминание: занятие у ученика Петя\nЛогопед\nЧерез 24 ч", true))
 	require.NoError(t, h.store.LogNotification(ctx, u.ID, "Напоминание", false))
 
 	h.handleNotifications(ctx, &tgbotapi.Message{From: &tgbotapi.User{ID: 999}})
 
 	all := strings.Join(sentTexts(h), "\n")
 	assert.Contains(t, all, "Анна Иванова", "реальное имя родителя")
-	assert.Contains(t, all, "Занятие у Пети назначено", "многострочный текст свёрнут в одну строку")
+	assert.Contains(t, all, "\n    Напоминание: занятие у ученика Петя\n    Логопед\n    Через 24 ч",
+		"название события на отдельной строке, не склеено с именем ученика")
 	assert.Contains(t, all, "не доставлено")
-	assert.Less(t, strings.Index(all, "Напоминание"), strings.Index(all, "Занятие у Пети"), "новые сверху")
+	assert.Less(t, strings.Index(all, "Напоминание"), strings.Index(all, "занятие у ученика Петя"), "новые сверху")
 }
 
 func TestHandleNotifications_RequiresTeacher(t *testing.T) {
