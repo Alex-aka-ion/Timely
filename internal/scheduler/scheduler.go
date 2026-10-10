@@ -221,7 +221,7 @@ func (s *Scheduler) intervalsFor(ctx context.Context, st store.Student) ([]time.
 // buildText формирует текст напоминания.
 func buildText(student, summary string, interval time.Duration, start time.Time) string {
 	return fmt.Sprintf(
-		"Напоминание: занятие у %s\n%s\nЧерез %s (%s)",
+		"Напоминание: занятие у ученика %s\n%s\nЧерез %s (%s)",
 		student, summary, humanInterval(interval), formatWhen(start),
 	)
 }
@@ -269,7 +269,7 @@ func (s *Scheduler) detectChange(ctx context.Context, in calendar.Instance, stud
 	switch {
 	case in.Status == calendar.StatusCancelled:
 		s.notifyContacts(ctx, student, fmt.Sprintf(
-			"Занятие у %s отменено.\nБыло запланировано на %s",
+			"Занятие у ученика %s отменено.\nБыло запланировано на %s",
 			student.DisplayName, formatWhen(prev.Start)))
 		if err := s.store.MarkEventCancelled(ctx, in.ID); err != nil {
 			log.Error("MarkEventCancelled", "instance_id", in.ID, "error", err)
@@ -277,7 +277,7 @@ func (s *Scheduler) detectChange(ctx context.Context, in calendar.Instance, stud
 
 	case !in.Start.Equal(prev.Start):
 		s.notifyContacts(ctx, student, fmt.Sprintf(
-			"Время занятия у %s изменено.\nСтало: %s",
+			"Время занятия у ученика %s изменено.\nСтало: %s",
 			student.DisplayName, formatWhen(in.Start)))
 		if err := s.store.SaveEventState(ctx, in.ID, in.Start); err != nil {
 			log.Error("SaveEventState (перенос)", "instance_id", in.ID, "error", err)
