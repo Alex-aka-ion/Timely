@@ -221,7 +221,7 @@ func (s *Scheduler) intervalsFor(ctx context.Context, st store.Student) ([]time.
 // buildText формирует текст напоминания.
 func buildText(student, summary string, interval time.Duration, start time.Time) string {
 	return fmt.Sprintf(
-		"Напоминание: занятие у ученика %s\n%s\nЧерез %s (%s)",
+		"Напоминание: занятие у ученика %s\nСобытие: %s\nЧерез %s (%s)",
 		student, summary, humanInterval(interval), formatWhen(start),
 	)
 }
